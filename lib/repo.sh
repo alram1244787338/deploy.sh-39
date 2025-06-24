@@ -22,11 +22,11 @@ repo_inject_file() {
     ## 2. 如果命名空间目录不存在，从 ${G_DATA}/inject/${G_REPO_NAME} 注入（对应项目通用代码）
     ## 3. 使用 rsync 进行文件同步，保持文件属性并覆盖目标文件
     if [ -d "$inject_code_path_branch" ]; then
-        echo "Found custom code in $inject_code_path_branch/, syncing to ${G_REPO_DIR}/"
+        echo "Found files in $inject_code_path_branch/, syncing to ${G_REPO_DIR}/"
         rsync -a "$inject_code_path_branch/" "${G_REPO_DIR}/"
     elif [ -d "$inject_code_path" ]; then
-        echo "Found custom code in $inject_code_path_branch/, syncing to ${G_REPO_DIR}/"
-        rsync -a "$inject_code_path_branch/" "${G_REPO_DIR}/"
+        echo "Found files in $inject_code_path/, syncing to ${G_REPO_DIR}/"
+        rsync -a "$inject_code_path/" "${G_REPO_DIR}/"
     fi
 
     ${arg_disable_inject:-false} && ENV_INJECT=keep
