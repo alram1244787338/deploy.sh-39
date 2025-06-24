@@ -348,10 +348,10 @@ system_cert_renew() {
             sleep "${random_minute}"m
         done
     done
-    ## deploy with my_deploy / 自定义部署方式
-    if [[ -f "${acme_home}/my_deploy.sh" ]]; then
-        _msg blue "Found ${acme_home}/my_deploy.sh"
-        bash "${acme_home}/my_deploy.sh"
+    ## deploy with acme_deploy / 自定义部署方式
+    if [[ -f "${acme_home}/acme_deploy.sh" ]]; then
+        _msg blue "Found ${acme_home}/acme_deploy.sh"
+        bash "${acme_home}/acme_deploy.sh"
     fi
     ## deploy with gitlab CI/CD / gitlab CI/CD 部署方式（项目名包含 nginx 的项目）
     if [ -f "$reload_nginx" ]; then
