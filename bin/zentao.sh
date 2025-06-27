@@ -3,22 +3,22 @@
 # shellcheck disable=SC1090
 
 # 解析JSON函数
-_parse_json() {
+parser_json() {
     local uri="$1"
-    curl -fsSL -H "token:${env_token:? undefined env_token}" \
-        "${env_json_url:? undefined env_json_url}/$uri" |
+    curl -fsSL -H "token:${ENV_TOKEN:? undefined ENV_TOKEN}" \
+        "${ENV_URL_JSON:? undefined ENV_URL_JSON}/$uri" |
         jq -r '.data' | jq '.'
 }
 
 # 函数定义
-_add_account() {
+add_account() {
     read -rp "请输入用户姓名[英文或中文]: " user_realname
     read -rp "请输入账号[英文]: " user_account
     local password
     password=$(_get_random_password 2>/dev/null)
 
-    curl -fsSL -H "token:${env_token:? undefined env_token}" \
-        "${env_api_url:? undefined env_api_url}/users" \
+    curl -fsSL -H "token:${ENV_TOKEN:? undefined ENV_TOKEN}" \
+        "${ENV_URL_API:? undefined ENV_URL_API}/users" \
         -d '{
     "realname": "'"${user_realname:? undefined user_realname}"'",
     "account": "'"${user_account:? undefined user_account}"'",
@@ -27,11 +27,11 @@ _add_account() {
     "gender": "m"
 }' |
         jq -r '.id'
-    echo "$env_json_url/  /  $user_realname / $user_account / ${password}" | tee -a "$SCRIPT_LOG"
+    echo "$ENV_URL_JSON/  /  $user_realname / $user_account / ${password}" | tee -a "$G_LOG"
 }
 
-_prepare_project_directory() {
-    local doing_path="${env_project_path:? undefined env_project_path}"
+project_directory() {
+    local doing_path="${ENV_PROJECT_PATH:? undefined ENV_PROJECT_PATH}"
     local closed_path="${doing_path}/已关闭"
     local get_project_json
     get_project_json=$(mktemp)
@@ -42,10 +42,10 @@ _prepare_project_directory() {
     fi
 
     ## 获取项目列表
-    case "${env_get_method:-db}" in
+    case "${ENV_GET_METHOD:-db}" in
     api)
-        _get_token || return $?
-        curl -fsSL -H "token:${env_token}" "${env_api_url:-}/projects?limit=1000" |
+        get_token || return $?
+        curl -fsSL -H "token:${ENV_TOKEN}" "${ENV_URL_API:-}/projects?limit=1000" |
             jq '.projects' >"$get_project_json"
         ;;
     db)
@@ -66,7 +66,7 @@ SELECT JSON_OBJECT(
 FROM zt_project t1
 WHERE t1.deleted = '0'
 AND t1.parent = '0'
-AND t1.id NOT IN (${env_project_exclude_id:-1})
+AND t1.id NOT IN (${ENV_PROJECT_EXCLUDE_IDS:-1})
 LIMIT ${offset},${batch_size};
 EOF
 
@@ -85,7 +85,7 @@ EOF
             # 增加偏移量
             offset=$((offset + batch_size))
             # 避免过度占用数据库资源
-            sleep 0.2
+            sleep 0.5
         done
 
         # 处理最后的逗号
@@ -93,24 +93,23 @@ EOF
             # 只有在文件非空时才处理
             sed -i '$s/,$//' "$tmp_result"
         fi
-        echo "[" >"$get_project_json"
-        cat "$tmp_result" >>"$get_project_json"
-        echo "]" >>"$get_project_json"
-
+        echo "[
+        $(cat "$tmp_result")
+        ]" >"$get_project_json"
+        # 清理临时文件
         rm -f "$tmp_sql" "$tmp_result"
         ;;
     esac
 
     ## 如果排除的项目目录存在且为空，则删除
-    if [[ -n "$env_project_exclude_id" ]]; then
-        for id in ${env_project_exclude_id//,/ }; do
+    if [[ -n "$ENV_PROJECT_EXCLUDE_IDS" ]]; then
+        for id in ${ENV_PROJECT_EXCLUDE_IDS//,/ }; do
             rmdir "$doing_path/${id}-*" 2>/dev/null
         done
     fi
 
-    # 第一步：处理所有 closed 状态的项目
+    # 合并处理所有项目，按 status 决定目标目录和查找方式
     while IFS=';' read -r id name status; do
-        [[ "$status" != 'closed' ]] && continue
         # 不足3位数前面补0
         printf -v id "%03d" "$id"
         # 转换名称中的特殊字符为短横线
@@ -121,63 +120,34 @@ EOF
         name="${name#-}"
         name="${name%-}"
 
-        # 获取源目录列表
-        mapfile -t source_dirs < <(find "$doing_path/" -mindepth 1 -maxdepth 1 -name "${id}-*" -type d)
-        # 如果有源目录存在
-        if [ "${#source_dirs[@]}" -gt 0 ]; then
+        if [[ "$status" == 'closed' ]]; then
             dest_path="$closed_path/${id}-${name}"
-            # 确保目标目录存在
-            mkdir -p "$dest_path"
-
-            # 遍历源目录
-            for src_dir in "${source_dirs[@]}"; do
-                if find "$src_dir" -mindepth 1 -maxdepth 1 -print0 | xargs -0 -I {} mv {} "$dest_path/"; then
-                    rmdir "$src_dir"
-                else
-                    rsync -a "$src_dir/" "$dest_path/" &&
-                        rm -rf "$src_dir"
-                fi
-            done
+            # 查找所有 ${id}-* 目录
+            mapfile -t source_dirs < <(find "$doing_path/" -mindepth 1 -maxdepth 1 -name "${id}-*" -type d)
+        else
+            dest_path="$doing_path/${id}-${name}"
+            # 查找除目标目录外的 ${id}-* 目录
+            mapfile -t source_dirs < <(find "$doing_path/" -mindepth 1 -maxdepth 1 -name "${id}-*" -type d ! -path "$dest_path")
         fi
-        # sleep 3
-    done < <(jq -r '.[] | (.id|tostring) + ";" + .name + ";" + .status' "$get_project_json")
-
-    # 第二步：处理其他状态的项目
-    while IFS=';' read -r id name status; do
-        [[ "$status" == 'closed' ]] && continue
-        # 不足3位数前面补0
-        printf -v id "%03d" "$id"
-        # 转换名称中的特殊字符为短横线
-        name="${name//[[:space:][:punct:]]/-}"
-        # 移除连续的短横线
-        name="${name//--/-}"
-        # 移除首尾的短横线
-        name="${name#-}"
-        name="${name%-}"
-
-        dest_path="$doing_path/${id}-${name}"
         mkdir -p "$dest_path"
-        # 获取源目录列表（排除目标目录）
-        mapfile -t source_dirs < <(find "$doing_path/" -mindepth 1 -maxdepth 1 -name "${id}-*" -type d ! -path "$dest_path")
-        # 如果有其他源目录
-        if [ "${#source_dirs[@]}" -gt 0 ]; then
-            while read -r src_dir; do
-                if find "$src_dir" -mindepth 1 -maxdepth 1 -print0 | xargs -0 -I {} mv "{}" "$dest_path/"; then
-                    rmdir "$src_dir"
-                else
-                    rsync -a "$src_dir/" "$dest_path/" &&
-                        rm -rf "$src_dir"
-                fi
-            done < <(find "$doing_path/" -mindepth 1 -maxdepth 1 -name "${id}-*" -type d ! -path "$dest_path")
+        if [ "${#source_dirs[@]}" -lt 1 ]; then
+            continue
         fi
-        # sleep 3
+
+        for src_dir in "${source_dirs[@]}"; do
+            if find "$src_dir" -mindepth 1 -maxdepth 1 -print0 | xargs -0 -I {} mv "{}" "$dest_path/"; then
+                rmdir "$src_dir" || rsync -a "$src_dir/" "$dest_path/" && rm -rf "$src_dir"
+            else
+                rsync -a "$src_dir/" "$dest_path/" && rm -rf "$src_dir"
+            fi
+        done
     done < <(jq -r '.[] | (.id|tostring) + ";" + .name + ";" + .status' "$get_project_json")
 
     rm -f "$get_project_json"
 }
 
 # 新增命令补全函数
-_completion() {
+completion() {
     local cur prev
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -189,43 +159,43 @@ _completion() {
         ;;
     add | project)
         # 从环境文件中获取可用的域名
-        if [[ -f "$SCRIPT_ENV" ]]; then
+        if [[ -f "$G_ENV" ]]; then
             local domains
             # 提取case语句中的域名
-            domains=$(grep -oP '(?<=")\w+(?:\.\w+)*(?="\))' "$SCRIPT_ENV")
+            domains=$(grep -oP '(?<=")\w+(?:\.\w+)*(?="\))' "$G_ENV")
             mapfile -t COMPREPLY < <(compgen -W "$domains" -- "$cur")
         fi
         ;;
     esac
 }
 
-_get_token() {
+get_token() {
     local token_timeout
     token_timeout=$(date +%s -d '3600 seconds ago')
-    if ((token_timeout > ${env_token_save_time:-0})); then
-        env_token=$(
+    if ((token_timeout > ${ENV_TOKEN_SAVE_TIME:-0})); then
+        ENV_TOKEN=$(
             "curl" -fsSL -x '' -H "Content-Type: application/json" \
-                "${env_api_url:? undefine env_api_url}/tokens" \
+                "${ENV_URL_API:? undefine ENV_URL_API}/tokens" \
                 -d '{
-                "account": "'"${env_account:-root}"'",
-                "password": "'"${env_password:-root}"'"
+                "account": "'"${ENV_ACCOUNT:-root}"'",
+                "password": "'"${ENV_PASSWORD:-root}"'"
 }' |
                 jq -r '.token'
         )
 
-        if [ -z "$env_token" ]; then
+        if [ -z "$ENV_TOKEN" ]; then
             echo "get token failed"
             return 1
         fi
         sed -i \
-            -e "s/env_token_save_time=$env_token_save_time/env_token_save_time=$(date +%s)/g" \
-            -e "s/env_token=.*/env_token=$env_token/g" "$SCRIPT_ENV"
+            -e "s/ENV_TOKEN_SAVE_TIME=$ENV_TOKEN_SAVE_TIME/ENV_TOKEN_SAVE_TIME=$(date +%s)/g" \
+            -e "s/ENV_TOKEN=.*/ENV_TOKEN=$ENV_TOKEN/g" "$G_ENV"
     else
         return 0
     fi
 }
 
-_common_lib() {
+import_common() {
     local file="${SCRIPT_PATH_PARENT}/lib/common.sh"
     if [ ! -f "$file" ]; then
         file='/tmp/common.sh'
@@ -242,51 +212,51 @@ _common_lib() {
 
 main() {
     # 注册命令补全
-    # complete -F _completion "$SCRIPT_NAME"
+    # complete -F completion "$G_NAME"
 
-    SCRIPT_NAME="$(basename "$0")"
-    SCRIPT_PATH="$(dirname "$(readlink -f "$0")")"
-    SCRIPT_PATH_PARENT="$(dirname "$SCRIPT_PATH")"
-    SCRIPT_DATA="${SCRIPT_PATH_PARENT}/data"
-    SCRIPT_LOG="${SCRIPT_DATA}/${SCRIPT_NAME}.log"
-    SCRIPT_ENV="${SCRIPT_DATA}/${SCRIPT_NAME}.env"
+    G_NAME="$(basename "$0")"
+    G_PATH="$(dirname "$(readlink -f "$0")")"
+    G_PATH_UP="$(dirname "$G_PATH")"
+    G_DATA="${G_PATH_UP}/data"
+    G_LOG="${G_DATA}/${G_NAME}.log"
+    G_ENV="${G_DATA}/${G_NAME}.env"
 
     # Create data directory if not exists
-    [ -d "$SCRIPT_DATA" ] || mkdir -p "$SCRIPT_DATA"
+    [ -d "$G_DATA" ] || mkdir -p "$G_DATA"
 
     # Create example env file if not exists
-    if [ ! -f "$SCRIPT_ENV" ]; then
-        cat >"$SCRIPT_ENV" <<'EOF'
+    if [ ! -f "$G_ENV" ]; then
+        cat >"$G_ENV" <<'EOF'
 # Zentao API Configuration
 case "$domain" in
 "example.com")
 # API认证信息
-env_account=root
-env_password=root123
-env_token=
-env_token_save_time=0
+ENV_ACCOUNT=root
+ENV_PASSWORD=root123
+ENV_TOKEN=
+ENV_TOKEN_SAVE_TIME=0
 # API端点
-env_json_url=http://example.com/zentao/json.php
-env_api_url=http://example.com/api.php/v1
+ENV_URL_JSON=http://example.com/zentao/json.php
+ENV_URL_API=http://example.com/api.php/v1
 # 项目管理配置
-env_project_path=/path/to/projects
-env_project_exclude_id=1,2,3
-env_get_method=db
+ENV_PROJECT_PATH=/path/to/projects
+ENV_PROJECT_EXCLUDE_IDS=1,2,3
+ENV_GET_METHOD=db
 ;;
 
 "dev.example.com")
 # API认证信息
-env_account=admin
-env_password=admin123
-env_token=
-env_token_save_time=0
+ENV_ACCOUNT=admin
+ENV_PASSWORD=admin123
+ENV_TOKEN=
+ENV_TOKEN_SAVE_TIME=0
 # API端点
-env_json_url=http://dev.example.com/zentao/json.php
-env_api_url=http://dev.example.com/api.php/v1
+ENV_URL_JSON=http://dev.example.com/zentao/json.php
+ENV_URL_API=http://dev.example.com/api.php/v1
 # 项目管理配置
-env_project_path=/path/to/dev/projects
-env_project_exclude_id=1
-env_get_method=api
+ENV_PROJECT_PATH=/path/to/dev/projects
+ENV_PROJECT_EXCLUDE_IDS=1
+ENV_GET_METHOD=api
 ;;
 *)
 echo "Unknown domain: $domain" >&2
@@ -298,39 +268,39 @@ EOF
     fi
 
     # Required environment variables in .env file:
-    # env_token           - API token for authentication
-    # env_token_save_time - Timestamp of token creation
-    # env_json_url        - Base URL for JSON API endpoints
-    # env_api_url         - Base URL for REST API endpoints
-    # env_project_path    - Base path for project directories
-    # env_project_exclude_id - Comma-separated list of project IDs to exclude
-    # env_get_method      - Method to get project list (api/db), defaults to 'db'
-    # env_account         - Account for API authentication (default: root)
-    # env_password        - Password for API authentication (default: root)
+    # ENV_TOKEN           - API token for authentication
+    # ENV_TOKEN_SAVE_TIME - Timestamp of token creation
+    # ENV_URL_JSON        - Base URL for JSON API endpoints
+    # ENV_URL_API         - Base URL for REST API endpoints
+    # ENV_PROJECT_PATH    - Base path for project directories
+    # ENV_PROJECT_EXCLUDE_IDS - Comma-separated list of project IDs to exclude
+    # ENV_GET_METHOD      - Method to get project list (api/db), defaults to 'db'
+    # ENV_ACCOUNT         - Account for API authentication (default: root)
+    # ENV_PASSWORD        - Password for API authentication (default: root)
 
-    _common_lib
+    import_common
 
     local action="$1"
     case "$action" in
     add)
         shift
-        source "$SCRIPT_ENV" "$@" || return $?
-        _get_token || return $?
-        _add_account
+        source "$G_ENV" "$@" || return $?
+        get_token || return $?
+        add_account
         ;;
     project)
         shift
-        source "$SCRIPT_ENV" "$@" || return $?
-        _prepare_project_directory "$@" || return $?
+        source "$G_ENV" "$@" || return $?
+        project_directory "$@" || return $?
         ;;
     json)
         shift
-        source "$SCRIPT_ENV" "$@" || return $?
-        _get_token || return $?
-        _parse_json "$@" || return $?
+        source "$G_ENV" "$@" || return $?
+        get_token || return $?
+        parser_json "$@" || return $?
         ;;
     *)
-        echo "Usage: $SCRIPT_NAME <add|project> <example.com>"
+        echo "Usage: $G_NAME <add|project> <example.com>"
         return 1
         ;;
     esac
