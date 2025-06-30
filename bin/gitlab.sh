@@ -257,7 +257,7 @@ check_large_repos() {
 gitlab_http_request() {
     local method=$1 endpoint=$2
     [ -z "$GITLAB_TOKEN" ] && {
-        log "ERROR" "GITLAB_TOKEN is not set"
+        _msg "ERROR" "GITLAB_TOKEN is not set"
         return 1
     }
     local curl_args=(curl -fsSL --request "$method" --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}")
