@@ -347,7 +347,7 @@ execute_command() {
                 "${args[@]}" --no-get-all
             ;;
         size) check_large_repos "${args[2]:-50}" ;;
-        did) delete_project_path "${args[2]}" ;;
+        did | delete) delete_project_path "${args[2]}" ;;
         dp) delete_project_pipeline_history "${args[2]}" ;;
         *)
             $cmd_gitlab "${args[@]}"
