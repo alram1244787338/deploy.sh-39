@@ -155,6 +155,7 @@ fi
 # zfs create -o compression=on -o atime=off -o casesensitivity=insensitive zfs03/share
 # net usershare add fly /zfs01/share /zfs01/share Everyone:F
 # zfs set sharenfs='rw' tank/home
+# zfs set sharenfs='rw,no_root_squash,no_subtree_check' zfs01/share
 
 ## 修改cluster IP
 # https://gist.github.com/matissime/ee7b5d1e937e751a97b0013caab24915
