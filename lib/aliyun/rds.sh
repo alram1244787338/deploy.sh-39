@@ -82,7 +82,7 @@ rds_list() {
             echo "实例ID            名称                状态    引擎    版本   规格               地域          创建时间"
             echo "----------------  ------------------  ------  ------  -----  -----------------  ------------  -------------------------"
             echo "$result" | jq -r '.Items.DBInstance[] | [.DBInstanceId, .DBInstanceDescription, .DBInstanceStatus, .Engine, .EngineVersion, .DBInstanceClass, .RegionId, .CreateTime] | @tsv' |
-            awk 'BEGIN {FS="\t"; OFS="\t"}
+                awk 'BEGIN {FS="\t"; OFS="\t"}
             {
                 status = $3;
                 if (status == "Running") status = "运行中";
@@ -148,7 +148,6 @@ rds_account_create() {
     fi
 
     # 验证密码复杂度
-    echo "$password"
     if [ "${#password}" -lt 8 ] || [ "${#password}" -gt 32 ]; then
         echo "错误：密码长度必须在8-32位之间。" >&2
         return 1
@@ -182,7 +181,7 @@ rds_account_create() {
 
     echo "创建 RDS 账号："
     echo "实例ID: $instance_id"
-    echo "账号名: $account_name"
+    echo "账号: $account_name / $password"
     echo "描述: $description"
 
     local result
@@ -463,7 +462,7 @@ rds_account_grant() {
 
     if [ -z "$instance_id" ] || [ -z "$account_name" ] || [ -z "$db_name" ]; then
         echo "错误：实例ID、账号名和数据库名不能为空。" >&2
-        echo "用法：rds account-grant <实例ID> <账号> <数据库名> [权限]" >&2
+        echo "用法：rds account-grant <实例ID> <账��> <数据库名> [权限]" >&2
         return 1
     fi
 
