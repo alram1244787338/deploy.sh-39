@@ -1,0 +1,21 @@
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim
+# Set Timezone
+ARG TZ=UTC
+ENV TZ=${TZ}
+# Set Python Environment Variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONFAULTHANDLER=1 \
+    PYTHONHASHSEED=random \
+    PYTHONIOENCODING=UTF-8
+
+WORKDIR /app
+COPY requirements.txt /app/
+## install uv
+# RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+## set python mirror
+# RUN pip install --no-cache-dir -r requirements.txt
+
+ONBUILD COPY ./root/ /
+ONBUILD RUN if [ -f /opt/onbuild.sh ]; then bash /opt/onbuild.sh; else :; fi
