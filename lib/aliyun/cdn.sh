@@ -293,8 +293,8 @@ cdn_pay() {
         --ProductCode dcdn \
         --PackageType FPT_dcdnpaybag_deadlineAcc_1541405199 \
         --Duration 1 \
-        --PricingCycle Year \
-        --Specification "$package_size")
+        --PricingCycle Month \
+        --Specification "$package_unit_size")
 
     log_result "${profile:-}" "$region" "cdn" "pay" "$result"
 }
