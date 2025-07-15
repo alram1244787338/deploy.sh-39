@@ -185,7 +185,7 @@ cdn_pay() {
     local package_unit_price=126 # 每 TB 单价 126 元
 
     # 阈值配置
-    local remaining_threshold=1.000 # 剩余容量阈值 1.9TB
+    local remaining_threshold=1.900 # 剩余容量阈值 1.9TB
     local balance_threshold=700     # 账户余额阈值 700 元
 
     # 查询当前资源包剩余容量
@@ -295,6 +295,8 @@ cdn_pay() {
         --Duration 1 \
         --PricingCycle Month \
         --Specification "$package_unit_size")
+        # --PricingCycle Year \
+        # --Specification "$package_size")
 
     log_result "${profile:-}" "$region" "cdn" "pay" "$result"
 }
