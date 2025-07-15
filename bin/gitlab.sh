@@ -105,7 +105,7 @@ EOF
 add_account_to_groups() {
     local user="$1" user_id level
 
-    _msg "add user [$user] to groups..."
+    _msg "Add user [$user] to groups..."
     user_id=$($cmd_gitlab user list --username "$user" | jq -r '.[].id')
 
     # GitLab access levels: 50=Owner, 40=Maintainer, 30=Developer, 20=Reporter, 10=Guest
@@ -142,26 +142,28 @@ update_account_password() {
 add_account() {
     local user="$1"
     local domain="$2"
-    local password_rand
+    local password_rand send_msg
 
     [ -z "${user}" ] && return 1
     password_rand=$(_get_random_password 2>/dev/null)
-    ## check if user exists
+    _msg "Check if user exists"
     if $cmd_gitlab user list --username "$user" | jq -e '.[0].name'; then
         _msg "User [$user] already exists"
         return 1
     fi
-    ## create user
+    _msg "Create user"
     $cmd_gitlab user create --name "$user" \
         --username "$user" \
         --password "${password_rand}" \
         --email "${user}@${domain}" \
         --skip-confirmation 1 \
         --can-create-group 0
-    _msg log "$ME_LOG" "username=$user / password=$password_rand"
 
-    send_msg="https://git.$domain  /  username=$user / password=$password_rand"
-    _notify_wecom "${gitlab_wecom_key:? ERR: empty wecom_key}" "$send_msg"
+    send_msg="https://git.$domain  / username=$user / password=$password_rand"
+
+    _msg log "$ME_LOG" "$send_msg"
+
+    _notify_wecom "${GITLAB_WECOM_KEY:? ERR: empty wecom_key}" "$send_msg"
 }
 
 import_lib() {
@@ -290,7 +292,7 @@ execute_command() {
     [ $# -eq 0 ] && print_usage && exit 1
     while [ "$#" -gt 0 ]; do
         case "$1" in
-        -d | --domain) gitlab_domain=$2 && shift ;;
+        -d | --domain) GITLAB_DOMAIN=$2 && shift ;;
         -a | --account) gitlab_account=$2 && shift ;;
         -p | --profile) gitlab_profile=$2 && shift ;;
         -h | --help) print_usage && exit 0 ;;
@@ -330,12 +332,12 @@ execute_command() {
                 "${args[@]}"
             ;;
         create)
-            add_account "${gitlab_account:? require user name}" "${gitlab_domain:? require domain}" "${args[@]}"
+            add_account "${gitlab_account:? require user name}" "${GITLAB_DOMAIN:? require domain}" "${args[@]}"
             add_account_to_groups "${gitlab_account:? require user name}" "${args[@]}"
             ;;
         update)
             password_rand=$(_get_random_password 2>/dev/null)
-            update_account_password "${gitlab_account:? require user name}" "${gitlab_domain:? require domain}" "$password_rand"
+            update_account_password "${gitlab_account:? require user name}" "${GITLAB_DOMAIN:? require domain}" "$password_rand"
             ;;
         esac
         ;;
