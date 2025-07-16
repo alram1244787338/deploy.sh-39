@@ -185,7 +185,7 @@ cdn_pay() {
     local package_unit_price=126 # 每 TB 单价 126 元
 
     # 阈值配置
-    local remaining_threshold=1.900 # 剩余容量阈值 1.9TB
+    local remaining_threshold=2.000 # 剩余容量阈值 2TB
     local balance_threshold=700     # 账户余额阈值 700 元
 
     # 查询当前资源包剩余容量
@@ -225,7 +225,7 @@ cdn_pay() {
         if ((remaining_https_request >= 20000000)); then
             https_color_code="\033[0;32m" # 大于2000万次时显示绿色
         fi
-        echo -e "[CDN] 剩余HTTPS请求次数: ${https_color_code}$(
+        echo -e "[$(date +'%F %T')] 剩余HTTPS请求次数: ${https_color_code}$(
             echo "$remaining_https_request" | awk '{
             if ($1 >= 100000000) {
                 printf "%.6f亿", $1/100000000
@@ -243,7 +243,7 @@ cdn_pay() {
     # 检查是否获取到有效的剩余容量值
     if [ "$remaining_amount" = "-1" ]; then
         if [[ -n "$show_message" ]]; then
-            echo -e "[CDN] \033[0;31m无法获取资源包剩余容量信息\033[0m"
+            echo -e "[$(date +'%F %T')] \033[0;31m无法获取资源包剩余容量信息\033[0m"
         fi
         return 1
     fi
@@ -254,7 +254,7 @@ cdn_pay() {
         if (($(echo "$remaining_amount > $remaining_threshold" | bc -l))); then
             traffic_color_code="\033[0;32m" # 充足时显示绿色
         fi
-        echo -e "[CDN] 剩余下行流量: ${traffic_color_code}${remaining_amount:-0}TB\033[0m"
+        echo -e "[$(date +'%F %T')] 剩余下行流量: ${traffic_color_code}${remaining_amount:-0}TB\033[0m"
     fi
 
     # 如果剩余容量充足，则跳过购买
@@ -272,7 +272,7 @@ cdn_pay() {
 
     # 检查账户余额是否充足
     if ((available_balance < (balance_threshold + package_unit_price))); then
-        echo -e "[CDN] \033[0;31m账户余额 $available_balance 元不足，无法购买资源包。\033[0m"
+        echo -e "[$(date +'%F %T')] \033[0;31m账户余额 $available_balance 元不足，无法购买资源包。\033[0m"
         return 1
     fi
 
