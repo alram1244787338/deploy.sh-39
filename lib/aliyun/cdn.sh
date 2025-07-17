@@ -288,6 +288,7 @@ cdn_pay() {
 
     # 执行购买操作
     log_result "${profile:-}" "$region" "cdn" "pay" "当前剩余: ${remaining_amount:-0}TB，准备购买 $((package_size / package_unit_size))TB 资源包..."
+    echo -e "[$(date +'%F %T')] 购买 1TB 资源包..."
     local result
     result=$(aliyun --profile "${profile:-}" bssopenapi CreateResourcePackage \
         --ProductCode dcdn \
