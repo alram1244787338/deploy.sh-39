@@ -179,13 +179,16 @@ cdn_prefetch() {
 cdn_pay() {
     set -e
     local show_message="$1"
+    local color_reset="\033[0m"
+    local color_green="\033[0;32m"
+    local color_red="\033[0;31m"
 
     # 资源包规格和价格配置
     local package_unit_size=1024 # 1TB = 1024GB
     local package_unit_price=126 # 每 TB 单价 126 元
 
     # 阈值配置
-    local remaining_threshold=2.000 # 剩余容量阈值 2TB
+    local remaining_threshold=5.000 # 剩余容量阈值 5TB
     local balance_threshold=700     # 账户余额阈值 700 元
 
     # 查询当前资源包剩余容量
@@ -196,7 +199,7 @@ cdn_pay() {
 
     while true; do
         query_result=$(aliyun --profile "${profile:-}" bssopenapi QueryResourcePackageInstances --ProductCode dcdn --PageNum "$page_num" --PageSize 100) || {
-            [[ -n "$show_message" ]] && echo -e "[CDN] \033[0;31m查询资源包失败\033[0m"
+            [[ -n "$show_message" ]] && echo -e "[CDN] ${color_red}查询资源包失败${color_reset}"
             return 1
         }
 
@@ -221,9 +224,9 @@ cdn_pay() {
     done
 
     if [[ -n "$show_message" ]]; then
-        local https_color_code="\033[0;31m" # 默认红色
+        local https_color_code="${color_red}" # 默认红色
         if ((remaining_https_request >= 20000000)); then
-            https_color_code="\033[0;32m" # 大于2000万次时显示绿色
+            https_color_code="${color_green}" # 大于2000万次时显示绿色
         fi
         echo -e "[$(date +'%F %T')] 剩余HTTPS请求次数: ${https_color_code}$(
             echo "$remaining_https_request" | awk '{
@@ -237,24 +240,24 @@ cdn_pay() {
                 printf "%d", $1
             }
         }'
-        )次\033[0m"
+        )次${color_reset}"
     fi
 
     # 检查是否获取到有效的剩余容量值
     if [ "$remaining_amount" = "-1" ]; then
         if [[ -n "$show_message" ]]; then
-            echo -e "[$(date +'%F %T')] \033[0;31m无法获取资源包剩余容量信息\033[0m"
+            echo -e "[$(date +'%F %T')] ${color_red}无法获取资源包剩余容量信息${color_reset}"
         fi
         return 1
     fi
 
     # 显示剩余容量信息并判断是否需要购买
     if [[ -n "$show_message" ]]; then
-        local traffic_color_code="\033[0;31m" # 默认红色
+        local traffic_color_code="${color_red}" # 默认红色
         if (($(echo "$remaining_amount > $remaining_threshold" | bc -l))); then
-            traffic_color_code="\033[0;32m" # 充足时显示绿色
+            traffic_color_code="${color_green}" # 充足时显示绿色
         fi
-        echo -e "[$(date +'%F %T')] 剩余下行流量: ${traffic_color_code}${remaining_amount:-0}TB\033[0m"
+        echo -e "[$(date +'%F %T')] 剩余下行流量: ${traffic_color_code}${remaining_amount:-0}TB${color_reset}"
     fi
 
     # 如果剩余容量充足，则跳过购买
@@ -272,7 +275,7 @@ cdn_pay() {
 
     # 检查账户余额是否充足
     if ((available_balance < (balance_threshold + package_unit_price))); then
-        echo -e "[$(date +'%F %T')] \033[0;31m账户余额 $available_balance 元不足，无法购买资源包。\033[0m"
+        echo -e "[$(date +'%F %T')] ${color_red}账户剩余 $available_balance 元，余额不足，无法购买资源包。${color_reset}"
         return 1
     fi
 

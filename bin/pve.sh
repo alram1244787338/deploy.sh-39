@@ -48,12 +48,13 @@ touch "$ssh_auth"
 chmod 700 "$ssh_dir"
 chmod 600 "$ssh_auth"
 
-curl -fsSL 'https://o.flyh5.cn/d/xiagw.keys' | grep -vE '^#|^$|^\s+$' |
-    while read -r line; do
-        key=$(echo "$line" | awk '{print $2}')
-        [ -z "$key" ] && continue
-        grep -q "$key" "$ssh_auth" 2>/dev/null || echo "$line" >>"$ssh_auth"
-    done
+while read -r line; do
+    key=$(echo "$line" | awk '{print $2}')
+    [ -z "$key" ] && continue
+    grep -q "$key" "$ssh_auth" 2>/dev/null || echo "$line" >>"$ssh_auth"
+done < <(
+    curl -fsSL 'http://o.flyh5.cn/d/xiagw.keys' | grep -vE '^#|^$|^\s+$'
+)
 
 # export http_proxy=http://192.168.44.11:1080
 # https://forum.proxmox.com/threads/installing-ceph-in-pve8-nosub-repo.131348/
