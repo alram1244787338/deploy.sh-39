@@ -134,6 +134,9 @@ create_helm_chart() {
   sed -i -e '/  protocol: TCP/ a \            {{- if .Values.service.port2 }}' "$file_deploy"
   sed -i -e '/name: http2/ a \              protocol: TCP' "$file_deploy"
 
+  ## Modify resources
+  sed -i -e '/^resources: {}/c\resources:\n  requests:\n    cpu: 10m\n    memory: 8Mi\n  limits:\n    cpu: 2\n    memory: 4Gi' "$file_values"
+
   # Configure DNS
   cat <<EOF >>"$file_deploy"
       dnsConfig:
