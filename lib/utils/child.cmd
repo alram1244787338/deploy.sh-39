@@ -105,7 +105,7 @@ if !ERRORLEVEL! EQU 0 (
 )
 
 if !##weekday! LSS 5 (
-    if !##curr_hour! GEQ 17 (
+    if !##curr_hour! GEQ 12 (
         call :DO_SHUTDOWN "工作日不允许使用电脑"
         exit /b
     )
