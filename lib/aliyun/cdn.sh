@@ -188,7 +188,7 @@ cdn_pay() {
     local package_unit_price=126 # 每 TB 单价 126 元
 
     # 阈值配置
-    local remaining_threshold=5.000 # 剩余容量阈值 5TB
+    local remaining_threshold=4.000 # 剩余容量阈值 4TB
     local balance_threshold=700     # 账户余额阈值 700 元
 
     # 查询当前资源包剩余容量
