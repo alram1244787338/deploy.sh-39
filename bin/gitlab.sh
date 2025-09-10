@@ -116,7 +116,7 @@ add_account_to_groups() {
         _msg "Added user [$user] to group [$group_name]"
     done < <(
         $cmd_gitlab group list --skip-groups 2 --top-level-only 1 |
-            jq -r '.[] | select(.name | test("(back-|front-|pms)")) | "\(.id)\t\(.name)"' |
+            jq -r '.[] | "\(.id)\t\(.name)"' |
             fzf --multi --prompt="Select groups (TAB to multi-select, ENTER to confirm): " --header="ID\tName" --height=60%
     )
 }
