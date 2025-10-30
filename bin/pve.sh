@@ -185,3 +185,44 @@ fi
 
 # watch -d -n 3 "zpool status; lsblk -S; cd /dev/disk/by-id/ && ls -l ata* | grep -v 'part.'"
 # sgdisk --zap-all --clear --mbrtogpt /dev/sdb
+
+# Upgrade from 8 to 9 - Proxmox VE
+# https://pve.proxmox.com/wiki/Upgrade_from_8_to_9
+
+# Set up Samba as a file server - Ubuntu Server documentation
+# https://documentation.ubuntu.com/server/how-to/samba/file-server/
+
+stop_all_node() {
+    # 获取集群所有运行中的VMID并关闭
+    for vmid in $(pvesh get /cluster/resources --type vm --output-format json | jq -r '.[] | select(.status == "running") | .vmid'); do
+        node=$(pvesh get /cluster/resources --type vm --output-format json | jq -r ".[] | select(.vmid == $vmid) | .node")
+        echo "Shutting down VM $vmid on node $node"
+        pvesh create "/nodes/$node/qemu/$vmid/status/shutdown"
+        {
+            timeout=60
+            elapsed=0
+            interval=2
+            while pvesh get "/nodes/$node/qemu/$vmid/status" --output-format json | jq -r '.status' 2>/dev/null | grep -q 'running'; do
+                if [ $elapsed -ge $timeout ]; then
+                    echo "VM $vmid did not shut down within $timeout seconds. Forcing stop."
+                    pvesh create "/nodes/$node/qemu/$vmid/status/stop"
+                    break
+                fi
+                sleep $interval
+                elapsed=$((elapsed + interval))
+            done
+            echo "VM $vmid has been stopped."
+        } &
+        sleep 1 # 避免API请求过载
+    done
+
+    ## 获取 pve2 上所有运行中的 VMID 并在 pve4 上创建复本
+    src_node="pve2"
+    dest_node="pve4"
+    pvesh get /cluster/resources --type vm --output-format json |
+        jq -r --arg src_node "$src_node" '.[] | select(.status == "running" and .node == $src_node) | .vmid' |
+        while read -r vmid; do
+            echo "$vmid"
+            pvesr create "${vmid}"-0 "$dest_node" #--source "$src_node"/"${vmid}" --target "$dest_node"
+        done
+}
