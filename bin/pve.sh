@@ -3,8 +3,7 @@
 # set -x
 
 ## set mirror
-sed -i 's|^deb http://ftp.debian.org|deb https://mirrors.ustc.edu.cn|g' /etc/apt/sources.list
-sed -i 's|^deb http://security.debian.org|deb https://mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list
+sed -i -e 's|^deb http://ftp.debian.org|deb https://mirrors.ustc.edu.cn|g' -e 's|^deb http://security.debian.org|deb https://mirrors.ustc.edu.cn/debian-security|g' /etc/apt/sources.list
 
 ## 修改 Proxmox 的源
 source /etc/os-release
