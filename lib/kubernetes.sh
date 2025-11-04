@@ -102,10 +102,10 @@ create_helm_chart() {
   sed -i -e "/volumeMounts:/ a \    mountPath: \"${mount_path}\"" "$file_values"
   sed -i -e "/volumeMounts:/ a \  - name: volume-cnfs" "$file_values"
 
-  ## set livenessProbe, spring delay 30s
+  ## set livenessProbe, spring delay 60s
   sed -i \
-    -e '/livenessProbe/ a \  initialDelaySeconds: 30' \
-    -e '/readinessProbe/a \  initialDelaySeconds: 30' \
+    -e '/livenessProbe/ a \  initialDelaySeconds: 60' \
+    -e '/readinessProbe/a \  initialDelaySeconds: 60' \
     "$file_values"
   if [[ "${protocol}" == 'tcp' ]]; then
     sed -i \
