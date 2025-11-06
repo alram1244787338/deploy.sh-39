@@ -67,13 +67,30 @@ deploy_to_kubernetes() {
         create_helm_chart "${helm_dir}"
     fi
 
-    echo "helm upgrade ${release_name} $helm_dir/ -i -n ${G_NAMESPACE} --set image.pullPolicy=Always,image.repository=${ENV_DOCKER_REGISTRY},image.tag=${G_IMAGE_TAG}" | sed "s#$HOME#\$HOME#g" | tee -a "$G_LOG"
+    # Convert HELM_OPT into array
+    read -ra helm_opt_array <<< "${HELM_OPT:-}"
+    local helm_args=(
+        "${helm_opt_array[@]}"
+        upgrade
+        "${release_name:?release_name parameter is required}"
+        "${helm_dir:?helm_dir parameter is required}"
+        --install
+        --namespace "${G_NAMESPACE:?namespace parameter is required}"
+        --create-namespace
+        --history-max 3
+        --hide-notes
+        --timeout 120s
+        --set "image.pullPolicy='Always'"
+        --set "image.repository=${ENV_DOCKER_REGISTRY},image.tag=${G_IMAGE_TAG}"
+    )
+    if [ "${G_NAMESPACE}" != main ]; then
+        helm_args+=("--set" "replicaCount=1")
+    fi
+    echo "${helm_args[@]}" | sed "s#$HOME#\$HOME#g" | tee -a "$G_LOG"
     ${GH_ACTION:-false} && return 0
 
     ## helm install / helm 安装  --atomic
-    $HELM_OPT upgrade "${release_name}" "$helm_dir/" --install --history-max 3 --hide-notes \
-        --namespace "${G_NAMESPACE}" --create-namespace --timeout 120s --set image.pullPolicy='Always' \
-        --set "image.repository=${ENV_DOCKER_REGISTRY},image.tag=${G_IMAGE_TAG}" >/dev/null || return 1
+    "${helm_args[@]}" >/dev/null || return 1
 
     # 检查是否在忽略列表中（不探测发布结果）
     if echo "${ENV_IGNORE_DEPLOY_CHECK[*]}" | grep -qw "${G_REPO_NAME}"; then
