@@ -153,11 +153,29 @@ ram_create() {
 
 ram_update() {
     local username=$1
-    local new_display_name=$2
-    echo "更新子账号："
-    local result
-    result=$(aliyun ram UpdateUser --UserName "$username" --NewDisplayName "$new_display_name" --profile "${profile:-}" --region "${region:-}")
-    echo "$result" | jq '.'
+    local password=$2
+    echo "设置子账号登录密码："
+
+    if [ -z "$username" ]; then
+        echo "错误：未提供用户名。" >&2
+        return 1
+    fi
+
+    if [ -z "$password" ]; then
+        echo "错误：未提供密码。" >&2
+        return 1
+    fi
+
+    local result cmd_result=0
+    result=$(aliyun ram CreateLoginProfile --UserName "$username" --Password "$password" --PasswordResetRequired false --MFABindRequired false --profile "${profile:-}" --region "${region:-}")
+    cmd_result=$?
+    if [ $cmd_result -eq 0 ]; then
+        echo "密码设置成功。"
+        echo "$result" | jq '.'
+    else
+        echo "错误：密码设置失败。"
+        echo "$result"
+    fi
     log_result "${profile:-}" "${region:-}" "ram" "update" "$result"
 }
 
