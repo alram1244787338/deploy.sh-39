@@ -352,7 +352,8 @@ build_base_image() {
     ${cmd} run --privileged --rm tonistiigi/binfmt --install all
   fi
 
-  "${cmd_opt[@]}" "${G_PATH}/conf/dockerfile/"
+  cmd_opt+=("${G_PATH}/conf/dockerfile/")
+  "${cmd_opt[@]}"
 }
 
 # Build selected base images
