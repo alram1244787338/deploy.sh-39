@@ -26,12 +26,12 @@ install_gitlab_runner() {
 
     # Install latest gitlab-runner if needed
     if _get_yes_no "[+] Install/Update gitlab-runner?"; then
-        sudo pkill -f gitlab-runner || true
         sudo systemctl stop gitlab-runner.service || true
+        sudo pkill -f gitlab-runner || true
         _msg "Installing gitlab-runner..."
         curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | sudo bash
-        sudo systemctl stop gitlab-runner.service || true
         sudo apt install -y gitlab-runner
+        sudo systemctl stop gitlab-runner.service || true
         sudo install -d -m 0755 -o "$user" -g "$user" "$user_home/runner"
         sudo mkdir -p /etc/systemd/system/gitlab-runner.service.d
         sudo tee /etc/systemd/system/gitlab-runner.service.d/override.conf <<EOF
