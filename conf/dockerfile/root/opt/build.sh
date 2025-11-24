@@ -278,6 +278,7 @@ _build_php() {
 
     if [ -f /swoole.so ]; then
         $cmd_pkg_opt libpq-dev
+        ext_dir="$(php -r 'echo ini_get("extension_dir");')"
         mv /swoole.so "$ext_dir"/
         echo "extension=swoole.so" >/etc/php/"${PHP_VERSION}"/mods-available/swoole.ini
         phpenmod swoole
