@@ -242,11 +242,15 @@ _build_php() {
     $cmd_pkg_opt lsb-release gnupg2 ca-certificates apt-transport-https software-properties-common
     LC_ALL=C.UTF-8 LANG=C.UTF-8 add-apt-repository -y ppa:ondrej/php
 
-    # _is_china && sed -i -e "s/ppa.launchpadcontent.net/launchpad.proxy.ustclug.org/" /etc/apt/sources.list.d/ondrej-ubuntu-php-jammy.list
-
-    $cmd_pkg update -yqq
+    if _is_china; then
+        find /etc/apt/sources.list.d/ -iname 'ondrej*.list' -print0 | xargs -0 -r -t -I {} sed -i -e "s/ppa.launchpadcontent.net/launchpad.proxy.ustclug.org/" {}
+    fi
 
     # Install PHP-specific packages based on version
+    ## 8.3 移除 mcrypt 扩展，改用 libsodium
+    ## 8.4 移除 xmlrpc 扩展，
+    ## 8.5 不安装 mongodb 扩展
+    $cmd_pkg update -yqq
     case "$PHP_VERSION" in
     8.3) $cmd_pkg_opt php"${PHP_VERSION}"-common ;;
     8.*) : ;;
@@ -255,7 +259,10 @@ _build_php() {
 
     # Upgrade and install PHP packages
     $cmd_pkg upgrade -yqq
-    $cmd_pkg_opt php"${PHP_VERSION}" php"${PHP_VERSION}"-{bcmath,bz2,curl,fpm,gd,gmp,imagick,intl,mbstring,mongodb,msgpack,mysql,redis,soap,sqlite3,xml,xmlrpc,zip}
+    case "$PHP_VERSION" in
+    8.5) $cmd_pkg_opt php"${PHP_VERSION}" php"${PHP_VERSION}"-{bcmath,bz2,curl,fpm,gd,gmp,imagick,intl,mbstring,msgpack,mysql,redis,soap,sqlite3,xml,zip} ;;
+    *) $cmd_pkg_opt php"${PHP_VERSION}" php"${PHP_VERSION}"-{bcmath,bz2,curl,fpm,gd,gmp,imagick,intl,mbstring,mongodb,msgpack,mysql,redis,soap,sqlite3,xml,xmlrpc,zip} ;;
+    esac
 
     # Install and configure web server
     case "$PHP_VERSION" in
@@ -274,7 +281,7 @@ _build_php() {
         echo "extension=swoole.so" >/etc/php/"${PHP_VERSION}"/mods-available/swoole.ini
         phpenmod swoole
     fi
-    # apt update && apt install -y libpq-dev # php"${PHP_VERSION}"-dev
+    # apt-get update && apt-get install -y libpq-dev # php"${PHP_VERSION}"-dev
     # pecl channel-update pecl.php.net
     # pecl install -D 'enable-sockets="no" enable-openssl="no" enable-http2="no" enable-mysqlnd="no" enable-swoole-json="no" enable-swoole-curl="no" enable-cares="no"' swoole-4.8.13
     # pecl install -D 'enable-sockets="no" enable-openssl="no" enable-http2="no" enable-mysqlnd="no" enable-swoole-json="no" enable-swoole-curl="no" enable-cares="no"' swoole-5.1.6
