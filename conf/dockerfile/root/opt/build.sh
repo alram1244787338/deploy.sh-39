@@ -204,8 +204,8 @@ _build_nginx() {
 }
 
 _build_php() {
-    ext_dir="$(php -r 'echo ini_get("extension_dir");')"
     if [ "${1}" = swoole ]; then
+        ext_dir="$(php -r 'echo ini_get("extension_dir");')"
         cp "$ext_dir"/swoole.so /
         return
     fi
@@ -644,7 +644,7 @@ main() {
 
     echo "build log file: $me_log"
 
-    if [  "$1" = swoole ]; then
+    if [ "$1" = swoole ]; then
         _build_php swoole
         return
     fi

@@ -5,7 +5,7 @@ ARG MIRROR=
 ARG SWOOLE_VERSION=6.1
 ARG PHP_VERSION=8.5
 ARG OS_VERSION=22.04
-FROM ${MIRROR}phpswoole/swoole:${SWOOLE_VERSION}-php${PHP_VERSION} AS swoole
+FROM ${MIRROR}phpswoole/swoole:${SWOOLE_VERSION}-php${PHP_VERSION} AS SWOOLE
 RUN --mount=type=bind,target=/src,rw \
     set -xe; \
     BUILD_SH=/src/root/opt/build.sh; \
@@ -24,7 +24,7 @@ EXPOSE 80 9000
 VOLUME ["/app"]
 WORKDIR /app
 CMD ["bash", "/opt/run0.sh"]
-COPY --from=swoole /swoole.so /
+COPY --from=SWOOLE /swoole.so /
 # RUN --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
 # --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # --mount=type=bind,target=/src,rw \
