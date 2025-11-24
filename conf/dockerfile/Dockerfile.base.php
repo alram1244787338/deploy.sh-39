@@ -2,6 +2,7 @@ ARG MIRROR=
 ## 4.8 PHP <=7.2, 5.0/5.1/6.0 PHP 8.0+
 ARG SWOOLE_VERSION=6.0
 ARG PHP_VERSION=8.5
+ARG OS_VERSION=22.04
 FROM ${MIRROR}phpswoole/swoole:${SWOOLE_VERSION}-php${PHP_VERSION} as swoole
 RUN --mount=type=bind,target=/src,rw \
     set -xe; \
@@ -10,8 +11,6 @@ RUN --mount=type=bind,target=/src,rw \
     [ -f $BUILD_SH ] || curl -fLo $BUILD_SH $BUILD_URL; \
     bash $BUILD_SH swoole
 
-ARG MIRROR=
-ARG OS_VERSION=22.04
 FROM ${MIRROR}ubuntu:${OS_VERSION}
 LABEL MAINTAINER="xiagw <fxiaxiaoyu@gmail.com>"
 ARG IN_CHINA=false
