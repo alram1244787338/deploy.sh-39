@@ -1,9 +1,11 @@
 ARG MIRROR=
-## 4.8 PHP <=7.2, 5.0/5.1/6.0 PHP 8.0+
-ARG SWOOLE_VERSION=6.0
+## PHP <= 7.2
+# ARG SWOOLE_VERSION=4.8
+## 5.0/5.1/6.1 PHP >= 8.0
+ARG SWOOLE_VERSION=6.1
 ARG PHP_VERSION=8.5
 ARG OS_VERSION=22.04
-FROM ${MIRROR}phpswoole/swoole:${SWOOLE_VERSION}-php${PHP_VERSION} as swoole
+FROM ${MIRROR}phpswoole/swoole:${SWOOLE_VERSION}-php${PHP_VERSION} AS swoole
 RUN --mount=type=bind,target=/src,rw \
     set -xe; \
     BUILD_SH=/src/root/opt/build.sh; \
