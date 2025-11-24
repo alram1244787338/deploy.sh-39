@@ -362,10 +362,10 @@ select_image_tags() {
   local all_tags=() tags=()
 
   all_tags=(
-    "php:5.6" "php:7.1" "php:7.3" "php:7.4" "php:8.1" "php:8.2" "php:8.3" "php:8.4"
+    "php:5.6" "php:7.1" "php:7.3" "php:7.4" "php:8.1" "php:8.2" "php:8.3" "php:8.4" "php:8.5"
     "mysql:5.6" "mysql:5.7" "mysql:8.0" "mysql:8.4" "mysql:9.0"
     "amazoncorretto:8" "amazoncorretto:17" "amazoncorretto:21" "amazoncorretto:23"
-    "node:18" "node:20" "node:21" "node:22"
+    "node:18" "node:20" "node:21" "node:22" "node:23" "node:24"
     "redis:latest"
     "nginx:stable-alpine"
   )
