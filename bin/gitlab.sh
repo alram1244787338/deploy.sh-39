@@ -14,14 +14,6 @@ new_element_user() {
 install_gitlab_runner() {
     local user user_home repo_url
 
-    # Install latest gitlab-runner if needed
-    if _get_yes_no "[+] Install/Update gitlab-runner?"; then
-        sudo pkill gitlab-runner || true
-        _msg "Installing gitlab-runner..."
-        curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | sudo bash
-        sudo apt install -y gitlab-runner
-    fi
-
     # Setup runner user
     if _get_yes_no "[+] Create CI user for gitlab-runner?"; then
         user=ops
@@ -30,6 +22,25 @@ install_gitlab_runner() {
     else
         user=$USER
         user_home=$HOME
+    fi
+
+    # Install latest gitlab-runner if needed
+    if _get_yes_no "[+] Install/Update gitlab-runner?"; then
+        sudo pkill -f gitlab-runner || true
+        sudo systemctl stop gitlab-runner.service || true
+        _msg "Installing gitlab-runner..."
+        curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | sudo bash
+        sudo systemctl stop gitlab-runner.service || true
+        sudo apt install -y gitlab-runner
+        sudo install -d -m 0755 -o "$user" -g "$user" "$user_home/runner"
+        sudo mkdir -p /etc/systemd/system/gitlab-runner.service.d
+        sudo tee /etc/systemd/system/gitlab-runner.service.d/override.conf <<EOF
+[Service]
+ExecStart=
+ExecStart=/usr/bin/gitlab-runner "run" "--config" "/etc/gitlab-runner/config.toml" "--working-directory" "$user_home/runner" "--service" "gitlab-runner" "--user" "$user"
+EOF
+        sudo systemctl daemon-reload
+        sudo systemctl start gitlab-runner.service || true
     fi
 
     # Install and start service
