@@ -358,10 +358,10 @@ _build_maven() {
     # Set up Maven options with standard parameters
     mvn_opts="mvn -T 1C --batch-mode --update-snapshots -DskipTests -Dmaven.compile.fork=true clean package"
     [ "$MVN_DEBUG" = off ] && mvn_opts+=" --quiet"
-    [ -f /root/.m2/settings.xml ] && mvn_opts+=" --settings=/root/.m2/settings.xml"
+    [ -f "$HOME/.m2/settings.xml" ] && mvn_opts+=" --settings=$HOME/.m2/settings.xml"
 
     # Run Maven build
-    $mvn_opts -DskipTests -Dmaven.compile.fork=true clean package
+    $mvn_opts
 
     # Copy artifacts to /jars directory
     mkdir -p /jars

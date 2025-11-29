@@ -10,7 +10,7 @@ parser_json() {
         jq -r '.data' | jq '.'
 }
 
-# 函数定义
+# 函数：生成随机密码新增用户
 add_account() {
     read -rp "请输入用户姓名[英文或中文]: " user_realname
     read -rp "请输入账号[英文]: " user_account
@@ -30,6 +30,7 @@ add_account() {
     echo "$ENV_URL_JSON/  /  $user_realname / $user_account / ${password}" | tee -a "$G_LOG"
 }
 
+# 函数：整理项目目录
 project_directory() {
     local doing_path="${ENV_PROJECT_PATH:? undefined ENV_PROJECT_PATH}"
     local closed_path="${doing_path}/已关闭"
@@ -50,10 +51,10 @@ project_directory() {
         ;;
     db)
         local tmp_sql tmp_result
-        tmp_sql="$(mktemp)"
-        tmp_result="$(mktemp)"
         local batch_size=1000
         local offset=0
+        tmp_sql="$(mktemp)"
+        tmp_result="$(mktemp)"
 
         while true; do
             # 修改 SQL 查询，添加 LIMIT 和 OFFSET
@@ -141,7 +142,7 @@ EOF
                 rsync -a "$src_dir/" "$dest_path/" && rm -rf "$src_dir"
             fi
         done
-    done < <(jq -r '.[] | (.id|tostring) + ";" + .name + ";" + .status' "$get_project_json")
+    done < <(jq -r '.[] | "\(.id);\(.name);\(.status)"' "$get_project_json")
 
     rm -f "$get_project_json"
 }
