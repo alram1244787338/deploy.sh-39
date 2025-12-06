@@ -691,12 +691,16 @@ _set_mirror() {
 }
 
 get_oom_score() {
+    ## Get top 15 processes by OOM score
+    printf "%-8s %-19s %s\n" "OOMScore" "PID" "Command"
     while read -r proc; do
         printf "%2d      %5d       %s\n" \
             "$(cat "$proc"/oom_score)" \
             "$(basename "$proc")" \
             "$(tr '\0' ' ' <"$proc"/cmdline | head -c 50)"
     done < <(find /proc -maxdepth 1 -regex '/proc/[0-9]+' 2>/dev/null | sort -nr | head -n 15)
+    echo
+    dmesg -T | grep -Ei 'error|crash|segmentation|fault|panic'
 }
 
 clean_snap() {
