@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # -*- coding: utf-8 -*-
 # shellcheck disable=SC1090
-
+set -eo pipefail
 # 解析JSON函数
 parser_json() {
     local uri="$1"
@@ -105,7 +105,7 @@ EOF
     ## 如果排除的项目目录存在且为空，则删除
     if [[ -n "$ENV_PROJECT_EXCLUDE_IDS" ]]; then
         for id in ${ENV_PROJECT_EXCLUDE_IDS//,/ }; do
-            rmdir "$doing_path/${id}-*" 2>/dev/null
+            find "$doing_path/${id}-"* -type d -empty -delete 2>/dev/null
         done
     fi
 
