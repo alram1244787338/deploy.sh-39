@@ -188,7 +188,7 @@ cdn_pay() {
     local package_unit_price=126 # 每 TB 单价 126 元
 
     # 阈值配置
-    local remaining_threshold=2.000 # 剩余容量阈值 2TB
+    local remaining_threshold=4.000 # 剩余容量阈值 4TB
     local balance_threshold=700     # 账户余额阈值 700 元
 
     # 查询当前资源包剩余容量
@@ -291,6 +291,7 @@ cdn_pay() {
 
     # 执行购买操作
     log_result "${profile:-}" "$region" "cdn" "pay" "当前剩余: ${remaining_amount:-0}TB，准备购买 $((package_size / package_unit_size))TB 资源包..."
+    ## 特殊方式，修改为只买1TB时长1月的（1月的单价108¥，6-12月的单价126¥）
     echo -e "[$(date +'%F %T')] 购买 1TB 资源包..."
     local result
     result=$(aliyun --profile "${profile:-}" bssopenapi CreateResourcePackage \
