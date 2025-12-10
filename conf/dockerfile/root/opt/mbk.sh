@@ -157,7 +157,7 @@ main() {
     else
         return 0
     fi
-
+    log "Create loop for backup_mysql..."
     while true; do
         # Initialize configuration
         if init_config; then
