@@ -7,8 +7,8 @@
 # Define script variables
 G_NAME=$(basename "$0")
 G_PATH=$(dirname "$(readlink -f "$0")")
-BACKUP_DIR="/backup"
 G_LOG="$BACKUP_DIR/${G_NAME}.log"
+BACKUP_DIR="/backup"
 
 log() {
     echo "[$(date +%Y%m%d_%u_%T.%3N)] [backup] $*" | tee -a "${G_LOG}"
@@ -16,7 +16,7 @@ log() {
 
 init_config() {
     # Check backup directory permissions
-    echo "init dir $G_PATH" >/dev/null
+    echo "$G_PATH" >/dev/null
     if [ ! -w "${BACKUP_DIR}" ]; then
         mkdir -m 755 "${BACKUP_DIR}"
     fi
@@ -25,22 +25,28 @@ init_config() {
         sed -i '/mysqladmin --defaults-extra-file=/i \  mysqladmin ping' /healthcheck.sh
         sed -i '/mysqladmin --defaults-extra-file=/d' /healthcheck.sh
     fi
+
+    # 等待数据文件存在且MySQL服务可用
+    local c=0
+    while ! {
+        [ -f "/var/lib/mysql/ibdata1" ] &&
+            [ -e "/var/lib/mysql/mysql.sock" ] &&
+            mysqladmin ping -h"localhost" --silent >/dev/null
+    }; do
+        c=$((c + 1))
+        sleep 1
+        if [ "$c" -gt 60 ]; then
+            return 1
+        fi
+    done
+
+    local my_ver
     my_ver=$(mysqld --version | awk '{print $3}' | cut -d. -f1)
     # Check required environment variables
     if [ -z "${MYSQL_ROOT_PASSWORD}" ]; then
         log "Error: MYSQL_ROOT_PASSWORD is not set"
         return 1
     fi
-
-    # 等待数据文件存在且MySQL服务可用
-    while ! {
-        [ -f "/var/lib/mysql/ibdata1" ] &&
-            [ -e "/var/lib/mysql/mysql.sock" ] &&
-            mysqladmin ping -h"localhost" --silent
-    }; do
-        sleep 1
-    done
-
     # MySQL versions below 8 need to set root password first
     if [ "$my_ver" -lt 8 ]; then
         # Check if root password is already set
@@ -68,50 +74,48 @@ init_config() {
     # Configure mysqldump command
     MYSQL_CLI="mysql --defaults-file=$my_cnf"
     MYSQLDUMP="mysqldump --defaults-file=$my_cnf --set-gtid-purged=OFF -E -R --triggers $dump_opt"
-}
 
-# Add disk space check
-check_disk_space() {
-    local required_space=5120 # Assume 5GB space needed
-    local available_space
-    available_space=$(df -m "${BACKUP_DIR}" | awk 'NR==2 {print $4}')
-    if [ "${available_space}" -lt "${required_space}" ]; then
-        log "ERR: Not enough disk space. Required: ${required_space}MB, Available: ${available_space}MB"
+    local space_used # 80% space used will exit
+    local space_thread=80
+    space_summary=$(df -m "${BACKUP_DIR}" | awk 'NR==2 {print}')
+    space_used=$(echo "${space_summary}" | awk '{print int($5)}')
+    if [ "${space_used}" -gt "${space_thread}" ]; then
+        log "ERR: Not enough disk space. Space used: ${space_summary}%"
         return 1
+    else
+        return 0
     fi
-    return 0
 }
 
 backup_mysql() {
-    local backup_time backup_file databases
-    backup_date="$(date +%Y%m%d)"
-    backup_time="$(date +%s)"
-
     # Get current timezone and hour
-    local timezone current_hour
+    local timezone
     timezone=$(date +%Z)
-    current_hour=$(date +%H)
 
     # Determine start hour based on timezone, 1:00-6:00 CST, 17:00-22:00 UTC
     local start_hour=1
     if [ "$timezone" = "UTC" ]; then
         start_hour=17 ## Asia/Shanghai 1:00 AM
     fi
+    local end_hour=$((start_hour + 5))
 
     # Check if within 5 hours after start time
-    log "Current timezone: ${timezone}, current hour: ${current_hour}, start hour: ${start_hour}"
-    if [ "$current_hour" -ge "$start_hour" ] && [ "$current_hour" -lt "$((start_hour + 5))" ]; then
+    local current_hour
+    current_hour=$(date +%H)
+    # log "Check timezone: ${timezone}, current hour: ${current_hour}:00, start hour: ${start_hour}:00"
+    if [ "$current_hour" -ge "$start_hour" ] && [ "$current_hour" -le "${end_hour}" ]; then
         log "Good time to backup (starting from ${start_hour}:00, within 5 hours)"
     else
         # log "WARN: Not good time($current_hour) to backup"
         return 0
     fi
 
+    local backup_time backup_file databases
+    backup_date="$(date +%Y%m%d)"
+    backup_time="$(date +%s)"
     if compgen -G "${BACKUP_DIR}/${backup_date}."* >/dev/null 2>&1; then
         log "WARN: Found backup file for today"
     fi
-
-    check_disk_space
 
     # Get all database lists (excluding system databases)
     databases="$($MYSQL_CLI -Ne 'show databases' | grep -vE 'information_schema|performance_schema|^sys$|^mysql$')"
@@ -151,7 +155,6 @@ main() {
     if [ "$UID" -eq 0 ]; then
         log "Daemon running"
     else
-        log "Not root, exit."
         return 0
     fi
 
@@ -168,7 +171,6 @@ main() {
     done
 }
 
-# Execute main function
 main "$@"
 
 #     $MYSQL_CLI <<'EOF'
