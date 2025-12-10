@@ -2,20 +2,19 @@
 # -*- coding: utf-8 -*-
 
 # set -x
-set -Eeo pipefail
+# set -Eeo pipefail
+
+# Define script variables
+G_NAME=$(basename "$0")
+G_PATH=$(dirname "$(readlink -f "$0")")
+BACKUP_DIR="/backup"
+G_LOG="$BACKUP_DIR/${G_NAME}.log"
 
 log() {
-    local message="$1"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [backup] $message" | tee -a "${G_LOG}"
+    echo "[$(date +%Y%m%d_%u_%T.%3N)] [backup] $*" | tee -a "${G_LOG}"
 }
 
 init_config() {
-    # Define script variables
-    G_NAME=$(basename "$0")
-    G_PATH=$(dirname "$(readlink -f "$0")")
-    BACKUP_DIR="/backup"
-    G_LOG="$BACKUP_DIR/${G_NAME}.log"
-
     # Check backup directory permissions
     echo "init dir $G_PATH" >/dev/null
     if [ ! -w "${BACKUP_DIR}" ]; then
@@ -25,8 +24,6 @@ init_config() {
     if [ -f /healthcheck.sh ]; then
         sed -i '/mysqladmin --defaults-extra-file=/i \  mysqladmin ping' /healthcheck.sh
         sed -i '/mysqladmin --defaults-extra-file=/d' /healthcheck.sh
-    else
-        log "not found /healthcheck.sh"
     fi
     my_ver=$(mysqld --version | awk '{print $3}' | cut -d. -f1)
     # Check required environment variables
@@ -56,7 +53,6 @@ init_config() {
             log "Root user connection failed"
             return 1
         fi
-
         dump_opt="--master-data=2"
     else
         dump_opt="--source-data=2"
@@ -80,7 +76,7 @@ check_disk_space() {
     local available_space
     available_space=$(df -m "${BACKUP_DIR}" | awk 'NR==2 {print $4}')
     if [ "${available_space}" -lt "${required_space}" ]; then
-        log "Error: Not enough disk space. Required: ${required_space}MB, Available: ${available_space}MB"
+        log "ERR: Not enough disk space. Required: ${required_space}MB, Available: ${available_space}MB"
         return 1
     fi
     return 0
@@ -88,7 +84,7 @@ check_disk_space() {
 
 backup_mysql() {
     local backup_time backup_file databases
-    backup_date="$(date +%F)"
+    backup_date="$(date +%Y%m%d)"
     backup_time="$(date +%s)"
 
     # Get current timezone and hour
@@ -96,29 +92,84 @@ backup_mysql() {
     timezone=$(date +%Z)
     current_hour=$(date +%H)
 
-    # Determine start hour based on timezone
-    local start_hour
+    # Determine start hour based on timezone, 1:00-6:00 CST, 17:00-22:00 UTC
+    local start_hour=1
     if [ "$timezone" = "UTC" ]; then
-        start_hour=17 ## Beijing time 1:00 AM
-    else
-        start_hour=1
+        start_hour=17 ## Asia/Shanghai 1:00 AM
     fi
 
     # Check if within 5 hours after start time
     log "Current timezone: ${timezone}, current hour: ${current_hour}, start hour: ${start_hour}"
-    if [ "$current_hour" -ge "$start_hour" ] && [ "$current_hour" -lt "$((start_hour + 3))" ]; then
-        log "Good time to backup (starting from ${start_hour}:00, within 3 hours)"
+    if [ "$current_hour" -ge "$start_hour" ] && [ "$current_hour" -lt "$((start_hour + 5))" ]; then
+        log "Good time to backup (starting from ${start_hour}:00, within 5 hours)"
     else
-        # log "Not good time($current_hour) to backup"
-        return
+        # log "WARN: Not good time($current_hour) to backup"
+        return 0
     fi
 
     if compgen -G "${BACKUP_DIR}/${backup_date}."* >/dev/null 2>&1; then
-        log "Warning: Found backup file for today, skipping this backup"
-        return
+        log "WARN: Found backup file for today"
     fi
 
     check_disk_space
+
+    # Get all database lists (excluding system databases)
+    databases="$($MYSQL_CLI -Ne 'show databases' | grep -vE 'information_schema|performance_schema|^sys$|^mysql$')"
+
+    for db in ${databases}; do
+        log "Starting backup for database: ${db}"
+        backup_file="${BACKUP_DIR}/${backup_date}.${backup_time}.full.${db}.sql"
+        if $MYSQL_CLI "${db}" -e 'select now()' >/dev/null; then
+            if ${MYSQLDUMP} "${db}" -r "${backup_file}"; then
+                log "Database ${db} backup successful: ${backup_file}"
+                command -v gzip && gzip -f "${backup_file}"
+                log "gzip successful: ${backup_file}.gz"
+            else
+                log "Database ${db} backup failed"
+            fi
+        else
+            log "Database ${db} does not exist"
+        fi
+    done
+
+    # Clean old backups，在clean文件中写一个数字就删除多少天前的文件，按修改时间
+    if [ -f "${BACKUP_DIR}/.clean" ]; then
+        local days
+        days="$(grep -oE '[0-9]+' "${BACKUP_DIR}/.clean" | head -n1)"
+        if [ -z "$days" ]; then
+            log "Not found NUMBERS in ${BACKUP_DIR}/.clean, skip clean"
+            return 0
+        fi
+        log "Cleaning backup files older than $days days"
+        find "${BACKUP_DIR}" -type f -iname "*.sql*" -mtime +"$days" -delete
+    else
+        log "Not found ${BACKUP_DIR}/.clean, skip clean backup files"
+    fi
+}
+
+main() {
+    if [ "$UID" -eq 0 ]; then
+        log "Daemon running"
+    else
+        log "Not root, exit."
+        return 0
+    fi
+
+    while true; do
+        # Initialize configuration
+        if init_config; then
+            # Start backup daemon process 等待mysql启动完成
+            sleep 30
+            backup_mysql
+        else
+            log "ERR: init_config fail, skip backup_mysql"
+        fi
+        sleep 1h
+    done
+}
+
+# Execute main function
+main "$@"
 
 #     $MYSQL_CLI <<'EOF'
 # START TRANSACTION;
@@ -132,57 +183,3 @@ backup_mysql() {
 # INSERT INTO `test2` (name, time) VALUES ('test', NOW());
 # COMMIT;
 # EOF
-    # Get all database lists (excluding system databases)
-    databases="$($MYSQL_CLI -Ne 'show databases' | grep -vE 'information_schema|performance_schema|^sys$|^mysql$')"
-
-    for db in ${databases}; do
-        log "Starting backup for database: ${db}"
-        backup_file="${BACKUP_DIR}/${backup_date}.${backup_time}.full.${db}.sql"
-        if $MYSQL_CLI "${db}" -e 'select now()' >/dev/null; then
-            if ${MYSQLDUMP} "${db}" -r "${backup_file}"; then
-                command -v gzip && gzip -f "${backup_file}"
-                log "Database ${db} backup successful: ${backup_file}"
-            else
-                log "Database ${db} backup failed"
-            fi
-        else
-            log "Database ${db} does not exist"
-        fi
-    done
-
-    # Clean old backups
-    if [ -f "${BACKUP_DIR}/.clean" ]; then
-        local days
-        days="$(grep -oE '[0-9]+' "${BACKUP_DIR}/.clean" | head -n1)"
-        if [ -z "$days" ]; then
-            log "Not found NUMBERS in ${BACKUP_DIR}/.clean, skip clean"
-            return
-        fi
-        log "Cleaning backup files older than $days days"
-        find "${BACKUP_DIR}" -type f -iname "*.sql" -mtime +"$days" -delete
-        find "${BACKUP_DIR}" -type f -iname "*.sql.gz" -mtime +"$days" -delete
-    else
-        log "Not found ${BACKUP_DIR}/.clean, skip clean backup files"
-    fi
-}
-
-main() {
-    if [ "$UID" -eq 0 ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [backup] daemon running"
-    else
-        return 0
-    fi
-
-    # Initialize configuration
-    init_config
-
-    # Start backup daemon process
-    while true; do
-        sleep 30
-        backup_mysql
-        sleep 1h
-    done
-}
-
-# Execute main function
-main "$@"
