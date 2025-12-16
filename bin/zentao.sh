@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # -*- coding: utf-8 -*-
 # shellcheck disable=SC1090
-set -eo pipefail
+set -Eeo pipefail
 # 解析JSON函数
 parser_json() {
     local uri="$1"
@@ -72,7 +72,7 @@ LIMIT ${offset},${batch_size};
 EOF
 
             # 执行查询并追加到结果文件
-            mysql --defaults-file="$HOME/.my.cnf.mysql04" -D zentao -N <"$tmp_sql" | sed 's/$/,/' >>"$tmp_result"
+            mysql --defaults-file="$HOME/.my.cnf.mysql04" -D zentao -N --connect-timeout=10 --read-timeout=60 <"$tmp_sql" | sed 's/$/,/' >>"$tmp_result"
 
             # 获取当前查询的行数
             local current_rows
@@ -113,13 +113,23 @@ EOF
     while IFS=';' read -r id name status; do
         # 不足3位数前面补0
         printf -v id "%03d" "$id"
-        # 转换名称中的特殊字符为短横线
-        name="${name//[[:space:][:punct:]]/-}"
-        # 移除连续的短横线
-        name="${name//--/-}"
-        # 移除首尾的短横线
-        name="${name#-}"
-        name="${name%-}"
+
+        # 确保在 Bash 环境中运行
+        shopt -s extglob
+        # 将空格、标点和连字符替换为单个下划线
+        name="${name//[[:space:][:punct:]-]/_}"
+
+        # 使用扩展 glob 模式去除首尾的一个或多个下划线
+        # 此模式需要 shopt -s extglob 启用
+        # 匹配开头的一个或多个下划线，并替换为空
+        name="${name##_+([_])}"
+        # 匹配结尾的一个或多个下划线，并替换为空
+        name="${name%%_+([_])}"
+
+        # 启用 nullglob 选项，防止模式匹配不到任何文件时导致错误
+        shopt -s nullglob
+        # --- 1. 确定目标路径和源目录搜索条件 ---
+        source_dirs=() # 初始化数组
 
         if [[ "$status" == 'closed' ]]; then
             dest_path="$closed_path/${id}-${name}"
@@ -130,18 +140,30 @@ EOF
             # 查找除目标目录外的 ${id}-* 目录
             mapfile -t source_dirs < <(find "$doing_path/" -mindepth 1 -maxdepth 1 -name "${id}-*" -type d ! -path "$dest_path")
         fi
+
+        # --- 2. 准备目标目录并检查源目录 ---
         mkdir -p "$dest_path"
-        if [ "${#source_dirs[@]}" -lt 1 ]; then
+
+        if [ "${#source_dirs[@]}" -eq 0 ]; then
+            # 如果没有找到任何源目录需要合并，直接跳过后续循环
             continue
         fi
 
+        # --- 3. 合并内容并清理源目录（使用 rsync 优化） ---
         for src_dir in "${source_dirs[@]}"; do
-            if find "$src_dir" -mindepth 1 -maxdepth 1 -print0 | xargs -0 -I {} mv "{}" "$dest_path/"; then
-                rmdir "$src_dir" || rsync -a "$src_dir/" "$dest_path/" && rm -rf "$src_dir"
+            echo "合并目录内容：'$src_dir/' -> '$dest_path/'"
+            # 使用 rsync 归档模式将内容移动到目标目录
+            if rsync -a --remove-source-files "$src_dir/" "$dest_path/"; then
+                # 尝试删除现在（理应）为空的源目录
+                rmdir "$src_dir" 2>/dev/null || echo "警告：无法删除空目录 $src_dir，可能包含隐藏文件。"
             else
-                rsync -a "$src_dir/" "$dest_path/" && rm -rf "$src_dir"
+                echo "错误：rsync 合并 $src_dir 失败，请手动检查。" >&2
             fi
         done
+
+        # 禁用 nullglob，恢复默认设置（如果需要）
+        shopt -u nullglob
+
     done < <(jq -r '.[] | "\(.id);\(.name);\(.status)"' "$get_project_json")
 
     rm -f "$get_project_json"
