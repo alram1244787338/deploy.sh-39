@@ -18,7 +18,7 @@ show_ram_help() {
     echo "  $0 ram create                          # 自动生成 dev 开头的用户名"
     echo "  $0 ram create test-user                # 自动生成显示名称"
     echo "  $0 ram create test-user 'Test User'    # 指定用户名和显示名称"
-    echo "  $0 ram update test-user 'New Test User'"
+    echo "  $0 ram update test-user 'New password'"
     echo "  $0 ram delete test-user"
     echo "  $0 ram create-key test-user"
     echo "  $0 ram grant-permission test-user"
@@ -36,7 +36,7 @@ handle_ram_commands() {
         ;;
     update)
         if [ $# -lt 2 ]; then
-            echo "错误：update 操作需要提供用户名和新显示名。" >&2
+            echo "错误：update 操作需要提供用户名和新密码。" >&2
             show_ram_help
             return 1
         fi
@@ -162,8 +162,7 @@ ram_update() {
     fi
 
     if [ -z "$password" ]; then
-        echo "错误：未提供密码。" >&2
-        return 1
+        password="$(_get_random_password 2>/dev/null)"
     fi
 
     local result cmd_result=0
