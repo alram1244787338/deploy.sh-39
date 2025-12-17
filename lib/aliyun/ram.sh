@@ -162,7 +162,7 @@ ram_update() {
     fi
 
     if [ -z "$password" ]; then
-        password="$(_get_random_password 2>/dev/null)"
+        password="$(_get_random_password 2>/dev/null)@@"
     fi
 
     local result cmd_result=0
