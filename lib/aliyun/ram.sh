@@ -170,6 +170,7 @@ ram_update() {
     cmd_result=$?
     if [ $cmd_result -eq 0 ]; then
         echo "密码设置成功。"
+        echo "$username / $password"
         echo "$result" | jq '.'
     else
         echo "错误：密码设置失败。"
