@@ -35,7 +35,7 @@ handle_ram_commands() {
         ram_create "$1" "$2"
         ;;
     update)
-        if [ $# -lt 2 ]; then
+        if [ $# -lt 1 ]; then
             echo "错误：update 操作需要提供用户名和新密码。" >&2
             show_ram_help
             return 1
