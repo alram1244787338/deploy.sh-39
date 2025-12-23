@@ -355,6 +355,8 @@ oss_parse_cdn_logs() {
 # 修改 oss_list 函数，使用 endpoint
 oss_list() {
     local format=${1:-human}
+
+    endpoint_url="http://oss-${region:-cn-hangzhou}.aliyuncs.com"
     local result
     result=$(ossutil --profile "${profile:-}" --endpoint "$endpoint_url" ls)
 

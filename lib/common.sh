@@ -140,7 +140,6 @@ _check_distribution() {
     _msg time "Check distribution..."
     if [ -r /etc/os-release ]; then
         . /etc/os-release
-        version_id="${VERSION_ID:-}"
         # lsb_dist="${ID,,}"
         lsb_dist="$(echo "${ID:-}" | tr '[:upper:]' '[:lower:]')"
     else
@@ -157,7 +156,7 @@ _check_distribution() {
         )
     fi
     lsb_dist="${lsb_dist:-unknown}"
-    _msg time "Your distribution is ${lsb_dist} ${version_id}, ARCH is $(uname -m)."
+    _msg time "Your distribution is ${lsb_dist} ${VERSION_ID:-}, ARCH is $(uname -m)."
 }
 
 _check_cmd() {
