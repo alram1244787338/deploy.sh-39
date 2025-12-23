@@ -7,8 +7,8 @@
 # Define script variables
 G_NAME=$(basename "$0")
 G_PATH=$(dirname "$(readlink -f "$0")")
-G_LOG="$BACKUP_DIR/${G_NAME}.log"
 BACKUP_DIR="/backup"
+G_LOG="$BACKUP_DIR/${G_NAME}.log"
 
 log() {
     echo "[$(date +%Y%m%d_%u_%T.%3N)] [backup] $*" | tee -a "${G_LOG}"
