@@ -1,7 +1,6 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
 
-# set -x
 # set -Eeo pipefail
 
 # Define script variables
@@ -11,7 +10,7 @@ BACKUP_DIR="/backup"
 G_LOG="$BACKUP_DIR/${G_NAME}.log"
 
 log() {
-    echo "[$(date +%Y%m%d_%u_%T.%3N)] [backup] $*" | tee -a "${G_LOG}"
+    echo "[$(date +%Y%m%d_%u_%T.%3N)] $*" | tee -a "${G_LOG}"
 }
 
 init_config() {
@@ -44,7 +43,7 @@ init_config() {
     my_ver=$(mysqld --version | awk '{print $3}' | cut -d. -f1)
     # Check required environment variables
     if [ -z "${MYSQL_ROOT_PASSWORD}" ]; then
-        log "Error: MYSQL_ROOT_PASSWORD is not set"
+        log "ERR: MYSQL_ROOT_PASSWORD is not set"
         return 1
     fi
     # MySQL versions below 8 need to set root password first
@@ -67,6 +66,7 @@ init_config() {
     my_cnf=/root/.my.cnf
     {
         echo "[client]"
+        echo "user=root"
         echo "password=$MYSQL_ROOT_PASSWORD"
     } >"$my_cnf"
     chmod 600 "$my_cnf"
@@ -80,7 +80,7 @@ init_config() {
     space_summary=$(df -m "${BACKUP_DIR}" | awk 'NR==2 {print}')
     space_used=$(echo "${space_summary}" | awk '{print int($5)}')
     if [ "${space_used}" -gt "${space_thread}" ]; then
-        log "ERR: Not enough disk space. Space used: ${space_summary}%"
+        log "ERR: Not enough disk space. Space used: ${space_summary}"
         return 1
     else
         return 0
@@ -122,18 +122,26 @@ backup_mysql() {
     databases="$($MYSQL_CLI -Ne 'show databases' | grep -vE 'information_schema|performance_schema|^sys$|^mysql$')"
 
     for db in ${databases}; do
-        log "Starting backup for database: ${db}"
-        backup_file="${BACKUP_DIR}/${backup_date}.${backup_time}.full.${db}.sql"
         if $MYSQL_CLI "${db}" -e 'select now()' >/dev/null; then
-            if ${MYSQLDUMP} "${db}" -r "${backup_file}"; then
+            log "Database ${db} exist"
+        else
+            log "Database ${db} does not exist"
+            continue
+        fi
+        backup_file="${BACKUP_DIR}/${backup_date}.${backup_time}.full.${db}.sql"
+        if command -v gzip; then
+            backup_file="${backup_file}.gz"
+            if ${MYSQLDUMP} "${db}" | gzip -c >"${backup_file}"; then
                 log "Database ${db} backup successful: ${backup_file}"
-                command -v gzip && gzip -f "${backup_file}"
-                log "gzip successful: ${backup_file}.gz"
             else
                 log "Database ${db} backup failed"
             fi
         else
-            log "Database ${db} does not exist"
+            if ${MYSQLDUMP} "${db}" -r "${backup_file}"; then
+                log "Database ${db} backup successful: ${backup_file}"
+            else
+                log "Database ${db} backup failed"
+            fi
         fi
     done
 
@@ -150,6 +158,7 @@ backup_mysql() {
     else
         log "Not found ${BACKUP_DIR}/.clean, skip clean backup files"
     fi
+    log "============cut line============"
 }
 
 main() {
@@ -158,7 +167,7 @@ main() {
     else
         return 0
     fi
-    log "Create loop for backup_mysql..."
+    log "Create daemon of backup_mysql..."
     while true; do
         # Initialize configuration
         if init_config; then
