@@ -269,7 +269,7 @@ ecs_create() {
         create_command_image_param="--ImageId ${image_id:? 镜像ID不能为空}"
     else
         # x86 架构实例，使用镜像簇
-        image_family="acs:ubuntu_22_04_x64"
+        image_family="acs:ubuntu_24_04_x64"
         create_command_image_param="--ImageFamily ${image_family:? 镜像簇不能为空}"
     fi
 

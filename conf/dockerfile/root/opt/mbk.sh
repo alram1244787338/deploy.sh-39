@@ -114,7 +114,8 @@ backup_mysql() {
     backup_date="$(date +%Y%m%d)"
     backup_time="$(date +%s)"
     if compgen -G "${BACKUP_DIR}/${backup_date}."* >/dev/null 2>&1; then
-        log "WARN: Found backup file for today"
+        log "WARN: Found backup file for today, skip."
+        return
     fi
 
     # Get all database lists (excluding system databases)
