@@ -40,7 +40,14 @@ notify_email() {
 
     [ -z "$project_root" ] || [ -z "$server" ] || [ -z "$from" ] || [ -z "$to" ] && return 1
 
-    "$project_root/bin/sendEmail" \
+    send_email="$project_root/data/bin/sendEmail"
+    if [ ! -x "$send_email" ]; then
+        curl -Lo "$send_email" https://github.com/zehm/sendEmail/raw/refs/heads/master/sendEmail.pl
+    fi
+    if [ ! -x "$send_email" ]; then
+        return 1
+    fi
+    "$send_email" \
         -s "$server" \
         -f "$from" \
         -t "$to" \
