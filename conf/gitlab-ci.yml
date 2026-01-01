@@ -1,3 +1,13 @@
+## 存放于一个公用（所有用户可读取）git 仓库，例如 pms:
+## 文件路径： /template/gitlab-ci.yml
+
+## 其他所有 gitlab 项目通用的 .gitlab-ci.yml 如下：
+# include:
+#   - project: 'root/pms' ## root是namespace，pms是仓库名
+#     ref: main
+#     file: 'templates/gitlab-ci.yml'
+
+
 variables:
   ## gitlab checkout 时不清理以下文件
   GIT_CLEAN_FLAGS: -ffdx -e node_modules/ -e vendor/ -e yarn.lock -e composer.lock -e .dockerignore

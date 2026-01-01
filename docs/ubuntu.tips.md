@@ -20,7 +20,7 @@ xfconf-query -c xfwm4 -p /general/use_compositing -s true   # 开启
 
 ### x11vnc 服务配置
 
-#### 登录界面 VNC 服务
+#### 登录界面 VNC 服务 （要替换用户id）
 ```ini
 # /lib/systemd/system/x11vnc-login.service
 [Unit]
@@ -30,13 +30,13 @@ After=multi-user.target
 [Service]
 Type=simple
 User=gdm
-ExecStart=/usr/bin/x11vnc -auth /run/user/126/gdm/Xauthority -forever -loop -repeat -rfbauth /home/gdm/.vnc/passwd -rfbport 5902 -shared -display :0
+ExecStart=/usr/bin/x11vnc -auth /run/user/1000/gdm/Xauthority -forever -loop -repeat -rfbauth /home/gdm/.vnc/passwd -rfbport 5902 -shared -display :0
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-#### 用户桌面 VNC 服务
+#### 用户桌面 VNC 服务（要替换用户id）
 ```ini
 # /lib/systemd/system/x11vnc.service
 [Unit]
@@ -46,7 +46,7 @@ After=multi-user.target
 [Service]
 Type=simple
 User=WHO
-ExecStart=/usr/bin/x11vnc -auth /run/user/1XXX/gdm/Xauthority -forever -loop -noxdamage -repeat -rfbauth /home/WHO/.vnc/passwd -rfbport 5900 -shared -xkb -display :1
+ExecStart=/usr/bin/x11vnc -auth /run/user/1000/gdm/Xauthority -forever -loop -noxdamage -repeat -rfbauth /home/WHO/.vnc/passwd -rfbport 5900 -shared -xkb -display :1
 
 [Install]
 WantedBy=multi-user.target

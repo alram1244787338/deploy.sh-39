@@ -4,24 +4,26 @@ run-name: ${{ gitea.actor }} is Gitea Actions 🚀
 on:
   push:
     branches:
-      - dev
       - develop
+      - dev
       - sit
-      - uat
       - testing
+      - uat
       - release
-      - master
       - main
+      - master
+      - prod
   pull_request:
     branches:
-      - dev
       - develop
+      - dev
       - sit
-      - uat
       - testing
+      - uat
       - release
-      - master
       - main
+      - master
+      - prod
 # on:
 #   schedule:
 #     - cron: '30 5 * * 1,3'

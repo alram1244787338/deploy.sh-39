@@ -1,3 +1,5 @@
+// 存放位置 openwrt:/www/wpad.dat
+
 function FindProxyForURL(url, host) {
     // 检查主机名是否为本地地址、简单主机名或私有网络地址
     if (host == "127.0.0.1" ||

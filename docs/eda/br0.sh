@@ -11,22 +11,30 @@ sleep 10
 
 reboot
 
-exit
+virt_install() {
+    cat >br0.xml <<EOF
+<network>
+    <name>br0</name>
+    <forward mode="bridge"/>
+    <bridge name="br0"/>
+</network>
+EOF
 
-virsh net-define br0.xml
-virsh net-start br0
-virsh net-autostart br0
-virsh net-list --all
+    virsh net-define br0.xml
+    virsh net-start br0
+    virsh net-autostart br0
+    virsh net-list --all
 
-virt-install \
---name centos7 \
---ram 4096 \
---disk path=/var/lib/libvirt/images/centos7.img,size=30 \
---vcpus 2 \
---os-type linux \
---os-variant rhel7 \
---network bridge=br0 \
---graphics none \
---console pty,target_type=serial \
---location 'http://mirrors.ustc.edu.cn/centos/7.9.2009/os/x86_64/' \
---extra-args 'console=ttyS0,115200n8 serial'
+    virt-install \
+        --name centos7 \
+        --ram 4096 \
+        --disk path=/var/lib/libvirt/images/centos7.img,size=30 \
+        --vcpus 2 \
+        --os-type linux \
+        --os-variant rhel7 \
+        --network bridge=br0 \
+        --graphics none \
+        --console pty,target_type=serial \
+        --location 'http://mirrors.ustc.edu.cn/centos/7.9.2009/os/x86_64/' \
+        --extra-args 'console=ttyS0,115200n8 serial'
+}

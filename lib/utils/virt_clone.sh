@@ -18,7 +18,7 @@ _base_to_template() {
 
 _template_to_new() {
     read -rp "New VM name: " read_vm_name
-    echo "VM name is: ${read_vm_name:? empty vm name}"
+    echo "VM name is: ${read_vm_name:? require vm name}"
     virt-clone --connect qemu:///system \
         --original-xml /etc/libvirt/qemu/template.xml \
         --file /var/lib/libvirt/images/"$read_vm_name".qcow2 \
