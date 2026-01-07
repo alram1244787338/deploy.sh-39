@@ -301,6 +301,7 @@ _build_php() {
         -e '/pm.max_spare_servers/s/3/20/' \
         -e '/^;slowlog.*log\//s//slowlog = \/var\/log\/php/' \
         -e '/^;request_slowlog_timeout.*/s//request_slowlog_timeout = 2/' \
+        -e '/default_socket_timeout/s/60/120/' \
         /etc/php/"${PHP_VERSION}"/fpm/pool.d/www.conf
 
     # Configure PHP
@@ -311,6 +312,7 @@ _build_php() {
         -e "/max_file_uploads/s/20/1024/" \
         -e '/disable_functions/s/$/phpinfo,/' \
         -e '/max_execution_time/s/30/120/' \
+        -e '/default_socket_timeout/s/60/120/' \
         /etc/php/"${PHP_VERSION}"/fpm/php.ini
 
     _check_run_sh
