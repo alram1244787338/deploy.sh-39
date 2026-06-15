@@ -1,55 +1,111 @@
 #!/bin/bash
 # -*- coding: utf-8 -*-
+#
+# 腾讯云账户余额查询。
+#
+# 取密钥优先级：
+#   1. 凭证文件中的指定配置段（默认 default，可通过第一个参数指定，如 `query_balance prod`）
+#   2. 上一步失败时回退到环境变量 TENCENT_SECRET_ID / TENCENT_SECRET_KEY
+#
+# 可选环境变量：
+#   DEBUG=true                  打印签名与请求细节（仅 stderr，不污染正常输出）
+#   TENCENT_CREDENTIALS_FILE    覆盖默认凭证文件路径 ~/.tencentcloud/credentials
 
+# 仅在 DEBUG 模式下向 stderr 打印调试信息，正常模式静默。
+_log_debug() {
+    [[ "${DEBUG:-}" == "true" ]] && echo "$@" >&2
+    return 0
+}
+
+# 检查必要的外部依赖命令是否存在，缺失时给出可读提示。
+_require_cmd() {
+    local missing=0 c
+    for c in "$@"; do
+        if ! command -v "$c" >/dev/null 2>&1; then
+            echo "错误：缺少依赖命令 '$c'，请先安装后再运行。" >&2
+            missing=1
+        fi
+    done
+    return $missing
+}
+
+# 跨平台地把 Unix 时间戳转换为 UTC 的 YYYY-MM-DD（BSD/macOS 用 -r，GNU/Linux 用 -d）。
+# 两种平台输出的日期字符串一致，因此签名结果不受平台影响。
+_epoch_to_date() {
+    local ts="$1"
+    date -u -r "$ts" +%Y-%m-%d 2>/dev/null || date -u -d "@$ts" +%Y-%m-%d 2>/dev/null
+}
+
+# 去除字符串首尾空白（纯 bash，不依赖 sed）。
+_trim() {
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
+}
+
+# 从凭证文件的指定配置段读取 secret_id / secret_key。
+# 成功：stdout 输出 "secret_id<TAB>secret_key"，返回 0。
+# 失败：不向 stderr 输出（避免环境变量回退成功时产生噪音），把具体原因写入全局变量
+#       CRED_ERR，并按原因返回不同退出码：
+#         2 = 文件不存在    3 = 配置段不存在    4 = 字段缺失
 read_credentials() {
-    local credentials_file="${HOME}/.tencentcloud/credentials"
-    local section="${1:-default}"  # 默认读取 default 配置段
+    CRED_ERR=""
+    local section="${1:-default}"
+    local credentials_file="${TENCENT_CREDENTIALS_FILE:-${HOME}/.tencentcloud/credentials}"
 
     if [[ ! -f "$credentials_file" ]]; then
-        echo "错误：找不到配置文件 ${credentials_file}" >&2
-        return 1
+        CRED_ERR="凭证文件不存在：${credentials_file}"
+        return 2
     fi
 
-    # 读取指定配置段的密钥信息
-    local in_section=0
-    local secret_id=""
-    local secret_key=""
+    local in_section=0 found_section=0
+    local secret_id="" secret_key=""
+    local line key value
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        # 去除行首尾空格
-        line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        line=$(_trim "$line")
 
-        # 跳过空行和注释
-        echo "$line" | grep -E '^$|^[#;]' >/dev/null && continue
+        # 跳过空行与注释（# 或 ; 开头）
+        [[ -z "$line" ]] && continue
+        [[ "$line" == "#"* || "$line" == ";"* ]] && continue
 
-        # 检查配置段
-        if [[ "$line" =~ ^\[(.*)\]$ ]]; then
-            if [[ "${BASH_REMATCH[1]}" == "$section" ]]; then
+        # 配置段标记 [name]
+        if [[ "$line" =~ ^\[(.+)\]$ ]]; then
+            if [[ "$(_trim "${BASH_REMATCH[1]}")" == "$section" ]]; then
                 in_section=1
+                found_section=1
             else
                 in_section=0
             fi
             continue
         fi
 
-        # 在目标配置段中读取配置项
-        if [[ $in_section -eq 1 ]]; then
-            if [[ "$line" =~ ^secret_id[[:space:]]*=[[:space:]]*(.*)$ ]]; then
-                secret_id="${BASH_REMATCH[1]}"
-            elif [[ "$line" =~ ^secret_key[[:space:]]*=[[:space:]]*(.*)$ ]]; then
-                secret_key="${BASH_REMATCH[1]}"
-            fi
+        # 目标配置段内的 key = value（用首个 = 切分，值中允许包含 =）
+        if [[ $in_section -eq 1 && "$line" == *=* ]]; then
+            key=$(_trim "${line%%=*}")
+            value=$(_trim "${line#*=}")
+            case "$key" in
+                secret_id)  secret_id="$value" ;;
+                secret_key) secret_key="$value" ;;
+            esac
         fi
     done < "$credentials_file"
 
-    # 检查是否成功读取到密钥
-    if [[ -z "$secret_id" || -z "$secret_key" ]]; then
-        echo "错误：在配置文件中未找到有效的密钥信息" >&2
-        return 1
+    if [[ $found_section -eq 0 ]]; then
+        CRED_ERR="凭证文件 ${credentials_file} 中未找到配置段 [${section}]"
+        return 3
     fi
 
-    # 输出密钥信息（用制表符分隔）
-    echo -e "${secret_id}\t${secret_key}"
+    local missing=()
+    [[ -z "$secret_id" ]]  && missing+=("secret_id")
+    [[ -z "$secret_key" ]] && missing+=("secret_key")
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        CRED_ERR="配置段 [${section}] 缺少字段：${missing[*]}（文件：${credentials_file}）"
+        return 4
+    fi
+
+    printf '%s\t%s' "$secret_id" "$secret_key"
 }
 
 generate_signature() {
@@ -60,7 +116,8 @@ generate_signature() {
     local host="billing.tencentcloudapi.com"
     local service="billing"
     local algorithm="TC3-HMAC-SHA256"
-    local date=$(date -u -d @$timestamp +%Y-%m-%d)
+    local date
+    date=$(_epoch_to_date "$timestamp")
 
     # 1. 拼接规范请求串
     local http_request_method="POST"
@@ -110,67 +167,119 @@ generate_signature() {
     echo "${algorithm} Credential=${secret_id}/${credential_scope}, SignedHeaders=${signed_headers}, Signature=${signature}"
 }
 
-query_balance() {
-    # 优先从配置文件读取密钥
-    local credentials
-    if credentials=$(read_credentials default); then
-        IFS=$'\t' read -r secret_id secret_key <<< "$credentials"
-    else
-        # 如果配置文件读取失败，尝试从环境变量获取
-        secret_id="${TENCENT_SECRET_ID}"
-        secret_key="${TENCENT_SECRET_KEY}"
-    fi
+# 发送余额查询请求。stdout 只输出接口返回的响应体；curl 的 verbose/错误
+# 信息一律走 stderr，且 verbose 仅在 DEBUG 模式下展示，绝不与 JSON 混在一起。
+# 返回 curl 的退出码（非 0 表示网络/传输错误）。
+# 该函数被单独拆出，便于测试时用 stub 替换，无需真正访问腾讯云接口。
+_send_billing_request() {
+    local authorization="$1"
+    local timestamp="$2"
+    local payload="$3"
+    local url="https://billing.tencentcloudapi.com/"
 
-    if [[ -z "$secret_id" ]] || [[ -z "$secret_key" ]]; then
-        echo "错误：未能获取到有效的密钥信息"
-        echo "请确保以下任一条件满足："
-        echo "1. 配置文件 ~/.tencentcloud/credentials 存在且包含有效的密钥信息"
-        echo "2. 环境变量 TENCENT_SECRET_ID 和 TENCENT_SECRET_KEY 已正确设置"
-        return 1
-    fi
+    local curl_args=(
+        -sS -X POST "$url"
+        -H "Authorization: $authorization"
+        -H "Content-Type: application/json"
+        -H "X-TC-Timestamp: $timestamp"
+        -H "X-TC-Action: DescribeAccountBalance"
+        -H "X-TC-Version: 2018-07-09"
+        -H "X-TC-Region: ap-guangzhou"
+        -d "$payload"
+    )
 
-    local timestamp=$(date +%s)
-    local payload="{}"
-    local authorization
-    authorization=$(generate_signature "$secret_id" "$secret_key" "$timestamp" "$payload")
+    local err_file body status
+    err_file=$(mktemp)
 
     if [[ "${DEBUG:-}" == "true" ]]; then
-        echo "Authorization: $authorization" >&2
-        echo "Timestamp: $timestamp" >&2
+        body=$(curl -v "${curl_args[@]}" 2>"$err_file")
+        status=$?
+        echo "===== curl 调试输出 =====" >&2
+        cat "$err_file" >&2
+        echo "=========================" >&2
+    else
+        body=$(curl "${curl_args[@]}" 2>"$err_file")
+        status=$?
+        # 正常模式下只在传输失败时把 curl 的错误透传到 stderr
+        [[ $status -ne 0 ]] && cat "$err_file" >&2
     fi
 
-    local response
-    response=$(curl -v -s -X POST "https://billing.tencentcloudapi.com/" \
-        -H "Authorization: $authorization" \
-        -H "Content-Type: application/json" \
-        -H "X-TC-Timestamp: $timestamp" \
-        -H "X-TC-Action: DescribeAccountBalance" \
-        -H "X-TC-Version: 2018-07-09" \
-        -H "X-TC-Region: ap-guangzhou" \
-        -d "$payload" 2>&1)
+    rm -f "$err_file"
+    printf '%s' "$body"
+    return $status
+}
 
-    if [[ -z "$response" ]]; then
-        echo "错误：查询请求失败，无响应。"
+query_balance() {
+    local section="${1:-default}"
+
+    _require_cmd curl jq openssl || return 1
+
+    # ---- 取密钥：配置段优先，失败回退环境变量 ----
+    local secret_id secret_key cred_source="" creds
+    if creds=$(read_credentials "$section"); then
+        IFS=$'\t' read -r secret_id secret_key <<< "$creds"
+        cred_source="凭证文件[${section}]"
+    else
+        _log_debug "凭证文件读取失败：${CRED_ERR}（尝试回退环境变量）"
+        secret_id="${TENCENT_SECRET_ID:-}"
+        secret_key="${TENCENT_SECRET_KEY:-}"
+        [[ -n "$secret_id" && -n "$secret_key" ]] && cred_source="环境变量"
+    fi
+
+    if [[ -z "$secret_id" || -z "$secret_key" ]]; then
+        echo "错误：未能获取到有效的密钥信息。" >&2
+        [[ -n "$CRED_ERR" ]] && echo "  - 凭证文件：${CRED_ERR}" >&2
+        echo "  - 环境变量：请设置 TENCENT_SECRET_ID 与 TENCENT_SECRET_KEY" >&2
+        echo "提示：可用第一个参数指定配置段（如 query_balance prod），或用 TENCENT_CREDENTIALS_FILE 指定文件路径。" >&2
+        return 1
+    fi
+    _log_debug "使用凭证来源：${cred_source}"
+
+    # ---- 构造并发送请求 ----
+    local timestamp payload authorization
+    timestamp=$(date +%s)
+    payload="{}"
+    authorization=$(generate_signature "$secret_id" "$secret_key" "$timestamp" "$payload")
+    _log_debug "Authorization: $authorization"
+    _log_debug "Timestamp: $timestamp"
+
+    local response status
+    response=$(_send_billing_request "$authorization" "$timestamp" "$payload")
+    status=$?
+
+    # ---- 统一错误路径 ----
+    if [[ $status -ne 0 ]]; then
+        echo "错误：查询请求失败（网络或传输错误，curl 退出码 ${status}）。" >&2
         return 1
     fi
 
-    # Check for errors in response
-    if echo "$response" | jq -e '.Response.Error' >/dev/null; then
-        local error_code
-        local error_message
-        error_code=$(echo "$response" | jq -r '.Response.Error.Code')
-        error_message=$(echo "$response" | jq -r '.Response.Error.Message')
-        echo "错误：查询失败 (代码: $error_code) - $error_message"
+    if [[ -z "${response//[[:space:]]/}" ]]; then
+        echo "错误：查询请求未返回任何内容。" >&2
         return 1
     fi
 
-    # 解析并显示余额信息
-    local balance
-    local credit
-    local real_balance
-    balance=$(echo "$response" | jq -r '.Response.Balance')
-    credit=$(echo "$response" | jq -r '.Response.Credit')
-    real_balance=$(echo "$response" | jq -r '.Response.RealBalance')
+    # JSON 合法性校验：非 JSON、半截内容都在这里被拦下，不让 jq 在后续解析时炸掉
+    if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+        echo "错误：响应不是合法的 JSON（可能是网络中断、被拦截或返回了非预期内容）。" >&2
+        _log_debug "原始响应（前 500 字符）："
+        _log_debug "$(printf '%s' "$response" | head -c 500)"
+        return 1
+    fi
+
+    # 接口返回的错误对象
+    if printf '%s' "$response" | jq -e '.Response.Error' >/dev/null 2>&1; then
+        local error_code error_message
+        error_code=$(printf '%s' "$response" | jq -r '.Response.Error.Code // "Unknown"')
+        error_message=$(printf '%s' "$response" | jq -r '.Response.Error.Message // "无错误信息"')
+        echo "错误：查询失败 (代码: ${error_code}) - ${error_message}" >&2
+        return 1
+    fi
+
+    # ---- 解析并显示余额信息 ----
+    local balance credit real_balance
+    balance=$(printf '%s' "$response" | jq -r '.Response.Balance // "N/A"')
+    credit=$(printf '%s' "$response" | jq -r '.Response.Credit // "N/A"')
+    real_balance=$(printf '%s' "$response" | jq -r '.Response.RealBalance // "N/A"')
 
     echo "账户余额信息："
     echo "--------------------------------"
@@ -180,4 +289,7 @@ query_balance() {
     return 0
 }
 
-query_balance "$@"
+# 仅在脚本被直接执行时运行查询；被 source 时不自动执行，便于测试注入 stub。
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    query_balance "$@"
+fi
