@@ -297,11 +297,16 @@ class OSSManager:
                     logging.error(f"读取断点文件失败: {str(e)}")
                     checkpoint = {}
 
-            # 获取上次的marker和统计数据
+            # 获取上次的marker和统计数据（断点续传时必须沿用，不能清零）
             marker = checkpoint.get('marker', '')
             processed_count = checkpoint.get('processed_count', 0)
-            success_count = checkpoint.get('success_count', 0)
             skipped_count = checkpoint.get('skipped_count', 0)
+            # 兼容旧断点：旧版本只记录 success_count，这里据此换算出已复制数
+            copied_count = checkpoint.get(
+                'copied_count',
+                max(checkpoint.get('success_count', 0) - skipped_count, 0)
+            )
+            failed_count = checkpoint.get('failed_count', 0)
             total_files = checkpoint.get('total_files', 0)
             last_update_time = checkpoint.get('last_update_time', '')
 
@@ -310,8 +315,9 @@ class OSSManager:
                     f"从断点继续迁移\n"
                     f"上次更新时间: {last_update_time}\n"
                     f"已处理: {processed_count} 个文件\n"
-                    f"已成功: {success_count} 个文件\n"
-                    f"已跳过: {skipped_count} 个文件"
+                    f"已复制: {copied_count} 个文件\n"
+                    f"已跳过: {skipped_count} 个文件\n"
+                    f"已失败: {failed_count} 个文件"
                 )
                 logging.info(resume_message)
                 print(resume_message)
@@ -324,23 +330,25 @@ class OSSManager:
 
             file_queue = queue.Queue(maxsize=batch_size * 2)
             producer_done = threading.Event()
-
-            # 添加删除队列
-            delete_queue = queue.Queue(maxsize=batch_size * 2)
-            files_to_delete = set()  # 使用集合存储待删除的文件
+            producer_error = threading.Event()  # 生产者扫描出错时置位，用于保留断点
+            counter_lock = threading.Lock()  # 保护所有共享计数器
 
             def save_checkpoint():
                 """保存断点续传状态"""
                 try:
-                    checkpoint_data = {
-                        'marker': marker,
-                        'processed_count': processed_count,
-                        'success_count': success_count,
-                        'skipped_count': skipped_count,
-                        'total_files': total_files,
-                        'prefix': prefix,
-                        'last_update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    }
+                    with counter_lock:
+                        checkpoint_data = {
+                            'marker': marker,
+                            'processed_count': processed_count,
+                            'copied_count': copied_count,
+                            'skipped_count': skipped_count,
+                            'failed_count': failed_count,
+                            # 同时写出 success_count，便于人工查看与旧版本兼容
+                            'success_count': copied_count + skipped_count,
+                            'total_files': total_files,
+                            'prefix': prefix,
+                            'last_update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        }
                     with open(checkpoint_file, 'w', encoding='utf-8') as f:
                         json.dump(checkpoint_data, f, indent=2, ensure_ascii=False)
                     logging.debug(f"断点状态已保存: {checkpoint_file}")
@@ -348,7 +356,7 @@ class OSSManager:
                     logging.error(f"保存断点状态失败: {str(e)}")
 
             def producer():
-                nonlocal marker, skipped_count, total_files
+                nonlocal marker, total_files
                 file_batch = []
 
                 try:
@@ -376,18 +384,10 @@ class OSSManager:
 
                 except Exception as e:
                     logging.error(f"扫描文件时发生错误: {str(e)}")
+                    producer_error.set()  # 标记扫描失败，保留断点供续传
                     save_checkpoint()  # 发生错误时也保存断点
                 finally:
                     producer_done.set()
-
-            # 将计数器声明为线程共享变量
-            success_count = 0
-            processed_count = 0
-            skipped_count = 0
-            total_files = 0
-
-            # 添加线程锁来保护计数器
-            counter_lock = threading.Lock()
 
             def save_files_to_delete(files):
                 """将待删除文件写入临时文件"""
@@ -399,67 +399,66 @@ class OSSManager:
                     logging.error(f"保存待删除文件列表失败: {str(e)}")
 
             def process_file_batch(file_batch):
-                """批量处理文件检查"""
-                nonlocal success_count, skipped_count, total_files, processed_count
-                batch_files_to_delete = set()  # 本批次待删除的文件
+                """批量筛选 IA 文件并放入复制队列"""
+                nonlocal processed_count, failed_count
 
-                try:
-                    source_headers = {}
-                    filtered_files = []
+                for obj in file_batch:
+                    # 单个对象的元数据获取失败只影响该对象，不破坏整批统计
+                    try:
+                        if not self._check_file_type(obj.key, file_types):
+                            continue
+                        headers = source_bucket.head_object(obj.key)
+                        storage_class = headers.headers.get('x-oss-storage-class', 'Standard')
 
-                    # 第一步：筛选IA文件
-                    for obj in file_batch:
-                        try:
-                            if self._check_file_type(obj.key, file_types):
-                                headers = source_bucket.head_object(obj.key)
-                                storage_class = headers.headers.get('x-oss-storage-class', 'Standard')
+                        if storage_class != 'IA':
+                            continue
 
-                                if storage_class == 'IA':
-                                    source_headers[obj.key] = headers
-                                    filtered_files.append(obj)
-                                    with counter_lock:
-                                        processed_count += 1  # 记录IA文件总数
-                                    logging.info(f"找到IA文件: oss://{source_bucket_name}/{obj.key}")
+                        with counter_lock:
+                            processed_count += 1  # 记录待迁移的 IA 文件总数
+                        logging.info(f"找到IA文件: oss://{source_bucket_name}/{obj.key}")
 
-                                    # 直接放入队列进行复制，不再检查目标
-                                    file_queue.put((obj, storage_class, headers.headers.get('etag', '').strip('"')))
-                                    # logging.info(f"文件已加入队列: oss://{source_bucket_name}/{obj.key}")
-                        except Exception as e:
-                            logging.error(f"文件: {obj.key} -> 获取元数据失败: {str(e)}")
-
-                    if delete_source and batch_files_to_delete:
-                        save_files_to_delete(batch_files_to_delete)
-
-                except Exception as e:
-                    logging.error(f"批量处理失败: {str(e)}")
+                        source_etag = headers.headers.get('etag', '').strip('"')
+                        # 放入队列，由消费者执行复制/跳过判断
+                        file_queue.put((obj, storage_class, source_etag))
+                    except Exception as e:
+                        with counter_lock:
+                            failed_count += 1
+                        logging.error(f"文件: {obj.key} -> 获取元数据失败: {str(e)}")
 
             def consumer():
-                nonlocal success_count, skipped_count
+                nonlocal copied_count, skipped_count, failed_count
                 local_files_to_delete = set()
 
                 while not (producer_done.is_set() and file_queue.empty()):
                     try:
-                        obj_info = file_queue.get(timeout=1)
-                        obj, storage_class, source_etag = obj_info
+                        obj, storage_class, source_etag = file_queue.get(timeout=1)
+                    except queue.Empty:
+                        continue
 
+                    try:
+                        # 预检查：目标已存在且 ETag 相同 => 视为已处理成功（跳过复制）
                         try:
-                            copy_success = False
-                            # 在复制前检查目标文件
-                            try:
-                                dest_obj = dest_bucket.head_object(obj.key)
-                                dest_etag = dest_obj.headers.get('etag', '').strip('"')
+                            dest_obj = dest_bucket.head_object(obj.key)
+                            dest_etag = dest_obj.headers.get('etag', '').strip('"')
+                            if dest_etag == source_etag:
+                                with counter_lock:
+                                    skipped_count += 1
+                                if delete_source:
+                                    local_files_to_delete.add(obj.key)
+                                logging.info(
+                                    f"文件已存在且一致，跳过复制: oss://{dest_bucket_name}/{obj.key}"
+                                )
+                                continue
+                        except oss2.exceptions.NoSuchKey:
+                            pass  # 目标不存在，正常进入复制流程
+                        except Exception as e:
+                            # 预检查失败不丢弃文件，记录后继续尝试复制（复制是幂等的）
+                            logging.warning(
+                                f"目标预检查失败，继续尝试复制: oss://{dest_bucket_name}/{obj.key} -> {str(e)}"
+                            )
 
-                                if dest_etag == source_etag:
-                                    with counter_lock:
-                                        skipped_count += 1
-                                        success_count += 1
-                                    if delete_source:
-                                        local_files_to_delete.add(obj.key)
-                                    continue
-                            except oss2.exceptions.NoSuchKey:
-                                pass  # 忽略目标文件不存在的404错误日志
-
-                            # 执行复制
+                        # 执行复制并校验
+                        try:
                             dest_bucket.copy_object(
                                 source_bucket_name,
                                 obj.key,
@@ -469,32 +468,38 @@ class OSSManager:
                                     'x-oss-metadata-directive': 'COPY',
                                 }
                             )
-
-                            # 验证复制是否成功
-                            try:
-                                dest_obj = dest_bucket.head_object(obj.key)
-                                dest_etag = dest_obj.headers.get('etag', '').strip('"')
-                                if dest_etag == source_etag:
-                                    copy_success = True
-                                    with counter_lock:
-                                        success_count += 1
-                                    if delete_source:
-                                        local_files_to_delete.add(obj.key)
-                                    logging.info(f"文件: oss://{source_bucket_name}/{obj.key} -> oss://{dest_bucket_name}/{obj.key} 迁移成功")
-                            except Exception as e:
-                                logging.error(f"验证复制结果失败: oss://{source_bucket_name}/{obj.key} -> oss://{dest_bucket_name}/{obj.key} -> {str(e)}")
+                            dest_obj = dest_bucket.head_object(obj.key)
+                            dest_etag = dest_obj.headers.get('etag', '').strip('"')
+                            if dest_etag == source_etag:
+                                with counter_lock:
+                                    copied_count += 1
+                                if delete_source:
+                                    local_files_to_delete.add(obj.key)
+                                logging.info(
+                                    f"文件: oss://{source_bucket_name}/{obj.key} -> "
+                                    f"oss://{dest_bucket_name}/{obj.key} 迁移成功"
+                                )
+                            else:
+                                with counter_lock:
+                                    failed_count += 1
+                                logging.error(
+                                    f"复制后校验不一致: oss://{dest_bucket_name}/{obj.key} "
+                                    f"(源 etag={source_etag}, 目标 etag={dest_etag})"
+                                )
                         except Exception as e:
-                            logging.error(f"复制文件失败: oss://{source_bucket_name}/{obj.key} -> oss://{dest_bucket_name}/{obj.key} -> {str(e)}")
-
-                        # 定期保存待删除文件列表
+                            with counter_lock:
+                                failed_count += 1
+                            logging.error(
+                                f"复制文件失败: oss://{source_bucket_name}/{obj.key} -> "
+                                f"oss://{dest_bucket_name}/{obj.key} -> {str(e)}"
+                            )
+                    finally:
+                        # 攒够一批就落盘，避免内存膨胀
                         if delete_source and len(local_files_to_delete) >= batch_size:
                             save_files_to_delete(local_files_to_delete)
                             local_files_to_delete.clear()
 
-                    except queue.Empty:
-                        continue
-
-                # 保存剩余的待删除文件
+                # 退出前保存剩余的待删除文件
                 if delete_source and local_files_to_delete:
                     save_files_to_delete(local_files_to_delete)
 
@@ -523,77 +528,78 @@ class OSSManager:
                 duration_str.append(f"{int(minutes)}分钟")
             duration_str.append(f"{int(seconds)}秒")
 
+            # 已存在且一致的文件同样计入“已处理成功”
+            success_count = copied_count + skipped_count
+
             end_message = (
                 f"同步完成: oss://{source_bucket_name} ==> oss://{dest_bucket_name}\n"
-                f"成功迁移: {success_count}/{processed_count} 个文件\n"
+                f"新复制: {copied_count} 个文件\n"
                 f"跳过已存在: {skipped_count} 个文件\n"
-                f"总耗时: {' '.join(duration_str)}"
-                + (f"\n已删除源文件" if delete_source else "")
+                f"成功(复制+已存在): {success_count}/{processed_count} 个文件\n"
+                + (f"失败: {failed_count} 个文件\n" if failed_count else "")
+                + f"总耗时: {' '.join(duration_str)}"
             )
 
             logging.info(end_message)
             print(end_message)
 
-            # 迁移完成后删除断点文件
-            if os.path.exists(checkpoint_file):
-                try:
-                    os.remove(checkpoint_file)
-                    logging.info("迁移完成，已删除断点文件")
-                except Exception as e:
-                    logging.error(f"删除断点文件失败: {str(e)}")
-
-            # 迁移完成后，不需要再次写入文件，因为已经在删除时写入了
-            if delete_source:
-                logging.info(f"已删除文件信息已保存到 {deleted_files_file}")
-
-            # 在所有复制完成后，处理文件删除
+            # 处理源文件删除（仅 delete_source=True）。
+            # 流程：临时文件 -> 实际删除并校验 -> 落盘 deleted_files_file，保证 restore_files 能对得上。
             if delete_source and os.path.exists(temp_delete_file):
                 deleted_count = 0
                 failed_deletes = []
+                successfully_deleted = []
+
+                def _verify_and_delete(keys):
+                    nonlocal deleted_count
+                    if not keys:
+                        return
+                    try:
+                        source_bucket.batch_delete_objects(keys)
+                    except Exception as e:
+                        logging.error(f"批量删除失败: {str(e)}")
+                        failed_deletes.extend(keys)
+                        return
+                    for key in keys:
+                        try:
+                            source_bucket.head_object(key)
+                            failed_deletes.append(key)  # 仍存在 => 删除未生效
+                        except oss2.exceptions.NoSuchKey:
+                            deleted_count += 1
+                            successfully_deleted.append(key)
+                        except Exception as e:
+                            logging.error(f"验证删除失败: oss://{source_bucket_name}/{key} -> {str(e)}")
+                            failed_deletes.append(key)
 
                 try:
                     with open(temp_delete_file, 'r', encoding='utf-8') as f:
-                        files_to_delete = set(line.strip() for line in f)
+                        pending_delete = set(line.strip() for line in f if line.strip())
 
-                    # 分批删除文件
                     batch = []
-                    for file_key in files_to_delete:
+                    for file_key in pending_delete:
                         batch.append(file_key)
                         if len(batch) >= batch_size:
-                            try:
-                                # 批量删除
-                                source_bucket.batch_delete_objects(batch)
-                                # 验证删除
-                                for key in batch:
-                                    try:
-                                        source_bucket.head_object(key)
-                                        failed_deletes.append(key)
-                                    except oss2.exceptions.NoSuchKey:
-                                        deleted_count += 1
-                                    except Exception as e:
-                                        logging.error(f"验证删除失败: oss://{source_bucket_name}/{key} -> {str(e)}")
-                            except Exception as e:
-                                logging.error(f"批量删除失败: {str(e)}")
-                                failed_deletes.extend(batch)
+                            _verify_and_delete(batch)
                             batch = []
+                    _verify_and_delete(batch)  # 处理剩余
 
-                    # 处理剩余的文件
-                    if batch:
-                        try:
-                            source_bucket.batch_delete_objects(batch)
-                            for key in batch:
-                                try:
-                                    source_bucket.head_object(key)
-                                    failed_deletes.append(key)
-                                except oss2.exceptions.NoSuchKey:
-                                    deleted_count += 1
-                                except Exception as e:
-                                    logging.error(f"验证删除失败: oss://{source_bucket_name}/{key} -> {str(e)}")
-                        except Exception as e:
-                            logging.error(f"批量删除失败: {str(e)}")
-                            failed_deletes.extend(batch)
+                    # 落盘已删除清单（与历史记录合并），供 restore_files 使用
+                    if successfully_deleted:
+                        existing_deleted = []
+                        if os.path.exists(deleted_files_file):
+                            try:
+                                with open(deleted_files_file, 'r', encoding='utf-8') as f:
+                                    existing_deleted = json.load(f)
+                                if not isinstance(existing_deleted, list):
+                                    existing_deleted = []
+                            except Exception as e:
+                                logging.error(f"读取已删除清单失败，将覆盖重写: {str(e)}")
+                                existing_deleted = []
+                        merged_deleted = sorted(set(existing_deleted) | set(successfully_deleted))
+                        with open(deleted_files_file, 'w', encoding='utf-8') as f:
+                            json.dump(merged_deleted, f, indent=2, ensure_ascii=False)
+                        logging.info(f"已删除 {deleted_count} 个源文件，清单已保存到 {deleted_files_file}")
 
-                    # 记录删除结果
                     if failed_deletes:
                         logging.error(f"以下文件删除失败: {failed_deletes}")
                     logging.info(f"成功删除 {deleted_count} 个文件")
@@ -604,10 +610,23 @@ class OSSManager:
                     # 清理临时文件
                     try:
                         os.remove(temp_delete_file)
-                    except Exception as e:
+                    except OSError as e:
                         logging.error(f"删除临时文件失败: {str(e)}")
 
-            return success_count > 0
+            # 仅在完整成功（无失败、扫描未中断）时清理断点，否则保留以便续传/排查
+            clean_finish = (failed_count == 0) and (not producer_error.is_set())
+            if clean_finish:
+                if os.path.exists(checkpoint_file):
+                    try:
+                        os.remove(checkpoint_file)
+                        logging.info("迁移完成，已删除断点文件")
+                    except Exception as e:
+                        logging.error(f"删除断点文件失败: {str(e)}")
+            else:
+                save_checkpoint()  # 保留可续传状态
+                logging.warning("迁移存在失败或扫描中断，已保留断点文件以便续传/排查")
+
+            return clean_finish
 
         except Exception as e:
             save_checkpoint()  # 发生异常时保存断点
