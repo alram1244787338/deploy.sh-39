@@ -380,11 +380,8 @@ class OSSManager:
                 finally:
                     producer_done.set()
 
-            # 将计数器声明为线程共享变量
-            success_count = 0
-            processed_count = 0
-            skipped_count = 0
-            total_files = 0
+            # 注意：计数器已在上方从 checkpoint 恢复（lines 301-305），
+            # 不要在此处重置，否则断点续传等同于从头开始。
 
             # 添加线程锁来保护计数器
             counter_lock = threading.Lock()
@@ -542,61 +539,69 @@ class OSSManager:
                 except Exception as e:
                     logging.error(f"删除断点文件失败: {str(e)}")
 
-            # 迁移完成后，不需要再次写入文件，因为已经在删除时写入了
-            if delete_source:
-                logging.info(f"已删除文件信息已保存到 {deleted_files_file}")
-
             # 在所有复制完成后，处理文件删除
             if delete_source and os.path.exists(temp_delete_file):
-                deleted_count = 0
+                deleted_keys = []  # 成功删除的文件 key
                 failed_deletes = []
 
                 try:
                     with open(temp_delete_file, 'r', encoding='utf-8') as f:
-                        files_to_delete = set(line.strip() for line in f)
+                        files_to_delete = set(line.strip() for line in f if line.strip())
+
+                    def _delete_batch(keys):
+                        """删除一批文件并验证，返回 (成功列表, 失败列表)"""
+                        ok, fail = [], []
+                        try:
+                            source_bucket.batch_delete_objects(keys)
+                            for key in keys:
+                                try:
+                                    source_bucket.head_object(key)
+                                    fail.append(key)
+                                except oss2.exceptions.NoSuchKey:
+                                    ok.append(key)
+                                except Exception as e:
+                                    logging.error(f"验证删除失败: oss://{source_bucket_name}/{key} -> {str(e)}")
+                                    fail.append(key)
+                        except Exception as e:
+                            logging.error(f"批量删除失败: {str(e)}")
+                            fail.extend(keys)
+                        return ok, fail
 
                     # 分批删除文件
                     batch = []
                     for file_key in files_to_delete:
                         batch.append(file_key)
                         if len(batch) >= batch_size:
-                            try:
-                                # 批量删除
-                                source_bucket.batch_delete_objects(batch)
-                                # 验证删除
-                                for key in batch:
-                                    try:
-                                        source_bucket.head_object(key)
-                                        failed_deletes.append(key)
-                                    except oss2.exceptions.NoSuchKey:
-                                        deleted_count += 1
-                                    except Exception as e:
-                                        logging.error(f"验证删除失败: oss://{source_bucket_name}/{key} -> {str(e)}")
-                            except Exception as e:
-                                logging.error(f"批量删除失败: {str(e)}")
-                                failed_deletes.extend(batch)
+                            ok, fail = _delete_batch(batch)
+                            deleted_keys.extend(ok)
+                            failed_deletes.extend(fail)
                             batch = []
 
                     # 处理剩余的文件
                     if batch:
-                        try:
-                            source_bucket.batch_delete_objects(batch)
-                            for key in batch:
-                                try:
-                                    source_bucket.head_object(key)
-                                    failed_deletes.append(key)
-                                except oss2.exceptions.NoSuchKey:
-                                    deleted_count += 1
-                                except Exception as e:
-                                    logging.error(f"验证删除失败: oss://{source_bucket_name}/{key} -> {str(e)}")
-                        except Exception as e:
-                            logging.error(f"批量删除失败: {str(e)}")
-                            failed_deletes.extend(batch)
+                        ok, fail = _delete_batch(batch)
+                        deleted_keys.extend(ok)
+                        failed_deletes.extend(fail)
 
                     # 记录删除结果
                     if failed_deletes:
                         logging.error(f"以下文件删除失败: {failed_deletes}")
-                    logging.info(f"成功删除 {deleted_count} 个文件")
+                    logging.info(f"成功删除 {len(deleted_keys)} 个源文件")
+
+                    # 将成功删除的文件列表落盘为 JSON，供 restore_files 使用
+                    if deleted_keys:
+                        try:
+                            # 合并已有的记录（支持多次迁移追加）
+                            existing = []
+                            if os.path.exists(deleted_files_file):
+                                with open(deleted_files_file, 'r', encoding='utf-8') as f:
+                                    existing = json.load(f)
+                            merged = list(set(existing + deleted_keys))
+                            with open(deleted_files_file, 'w', encoding='utf-8') as f:
+                                json.dump(merged, f, indent=2, ensure_ascii=False)
+                            logging.info(f"已删除文件列表已保存到 {deleted_files_file}")
+                        except Exception as e:
+                            logging.error(f"保存已删除文件列表失败: {str(e)}")
 
                 except Exception as e:
                     logging.error(f"处理文件删除时发生错误: {str(e)}")
@@ -607,7 +612,8 @@ class OSSManager:
                     except Exception as e:
                         logging.error(f"删除临时文件失败: {str(e)}")
 
-            return success_count > 0
+            # 没有任何 IA 文件需要处理也算成功；有处理时看成功数
+            return success_count > 0 or processed_count == 0
 
         except Exception as e:
             save_checkpoint()  # 发生异常时保存断点
