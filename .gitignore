@@ -1,23 +1,37 @@
-## macos
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+*.whl
+
+# Go
+vendor/
+go.sum
+
+# Node / npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-
-## vim swap
-.swp
-*.log
-*.env
-
-## gitlab runner exclude
-builds/
-cache/
-
-## deploy.sh conf/
-conf/deploy.*
-!conf/example-*
-
-## data/
-data/**
-!data/README.md
-
-## custome folder
-tmp/
-.cursor/
+Thumbs.db
